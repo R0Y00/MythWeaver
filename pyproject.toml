@@ -1,0 +1,14 @@
+[project]
+name = "mythweaver"
+version = "0.9.5"
+description = "Administrator-defined games with direct NapCat integration"
+requires-python = ">=3.12"
+dependencies = ["fastapi", "uvicorn[standard]", "sqlalchemy", "psycopg[binary]", "jsonschema", "httpx", "python-dotenv", "cryptography"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

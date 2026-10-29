@@ -1,0 +1,227 @@
+{
+  "name": "示例 · 城市调查",
+  "description": "管理员预拟调查步骤，玩家发起调查，关键发展由管理员指定。线索可以关联自定义人物，不依赖战斗或骰子。",
+  "definition": {
+    "types": {
+      "person": {
+        "label": "相关人物",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "姓名"
+            },
+            "notes": {
+              "type": "string",
+              "title": "管理员资料"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "lead": {
+        "label": "线索",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "title": "名称"
+            },
+            "state": {
+              "type": "string",
+              "title": "进展"
+            },
+            "development": {
+              "type": "string",
+              "title": "已确认发展"
+            },
+            "witness": {
+              "type": "string",
+              "title": "相关人物",
+              "x-reference": {
+                "type_key": "person"
+              }
+            }
+          },
+          "required": [
+            "title",
+            "state",
+            "development"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "interactions": {
+      "investigate": {
+        "label": "调查线索",
+        "mode": "flow",
+        "workflow": "investigation",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "选择线索",
+              "x-reference": {
+                "type_key": "lead"
+              }
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "workflows": {
+      "investigation": {
+        "label": "线索发展安排",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "选择线索",
+              "x-reference": {
+                "type_key": "lead"
+              }
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "start": "begin",
+        "steps": {
+          "begin": {
+            "kind": "effects",
+            "label": "记录开始调查",
+            "effects": [
+              {
+                "type_key": "lead",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "调查中"
+              }
+            ],
+            "next": "direction"
+          },
+          "direction": {
+            "kind": "manual",
+            "label": "管理员确定发生什么",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "route": {
+                  "type": "string",
+                  "enum": [
+                    "公开",
+                    "继续追踪"
+                  ],
+                  "title": "后续方向"
+                },
+                "development": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "确认发生的发展"
+                }
+              },
+              "required": [
+                "route",
+                "development"
+              ],
+              "additionalProperties": false
+            },
+            "locks": [
+              "input.target"
+            ],
+            "effects": [
+              {
+                "type_key": "lead",
+                "id_from": "input.target",
+                "field": "development",
+                "operation": "set",
+                "value_from": "answers.direction.development"
+              }
+            ],
+            "next": "branch"
+          },
+          "branch": {
+            "kind": "branch",
+            "label": "按指定方向推进",
+            "condition": {
+              "left": {
+                "path": "answers.direction.route"
+              },
+              "op": "eq",
+              "right": {
+                "value": "公开"
+              }
+            },
+            "yes": "reveal",
+            "no": "follow"
+          },
+          "reveal": {
+            "kind": "effects",
+            "label": "标记已公开",
+            "effects": [
+              {
+                "type_key": "lead",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "已公开"
+              }
+            ],
+            "next": "finish"
+          },
+          "follow": {
+            "kind": "effects",
+            "label": "保留后续调查",
+            "effects": [
+              {
+                "type_key": "lead",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "继续追踪"
+              }
+            ],
+            "next": "finish"
+          },
+          "finish": {
+            "kind": "end",
+            "label": "本次调查结束",
+            "result": "关键发展来自管理员明确决定，后续可再次发起调查。"
+          }
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "type_key": "person",
+      "data": {
+        "name": "档案管理员",
+        "notes": "示例私有资料，不自动回复 QQ。"
+      }
+    },
+    {
+      "type_key": "lead",
+      "data": {
+        "title": "旧车站的封存档案",
+        "state": "未调查",
+        "development": ""
+      }
+    }
+  ]
+}

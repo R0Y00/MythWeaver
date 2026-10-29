@@ -1,0 +1,229 @@
+{
+  "name": "示例 · 提案协作",
+  "description": "不含战斗、背包或随机。小额提案自动通过，大额提案等待管理员指定额度；其他提案可继续处理。",
+  "definition": {
+    "types": {
+      "proposal": {
+        "label": "提案",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "title": "标题"
+            },
+            "state": {
+              "type": "string",
+              "title": "状态"
+            },
+            "allocation": {
+              "type": "number",
+              "title": "确定额度"
+            }
+          },
+          "required": [
+            "title",
+            "state",
+            "allocation"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "interactions": {
+      "request": {
+        "label": "提交提案额度",
+        "mode": "flow",
+        "workflow": "allocation",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "选择提案",
+              "x-reference": {
+                "type_key": "proposal"
+              }
+            },
+            "requested": {
+              "type": "number",
+              "minimum": 0,
+              "title": "申请额度"
+            }
+          },
+          "required": [
+            "target",
+            "requested"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "workflows": {
+      "allocation": {
+        "label": "提案额度决定",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "选择提案",
+              "x-reference": {
+                "type_key": "proposal"
+              }
+            },
+            "requested": {
+              "type": "number",
+              "minimum": 0,
+              "title": "申请额度"
+            }
+          },
+          "required": [
+            "target",
+            "requested"
+          ],
+          "additionalProperties": false
+        },
+        "start": "check",
+        "steps": {
+          "check": {
+            "kind": "branch",
+            "label": "小额直接安排",
+            "condition": {
+              "left": {
+                "path": "input.requested"
+              },
+              "op": "lte",
+              "right": {
+                "value": 10
+              }
+            },
+            "yes": "automatic",
+            "no": "review"
+          },
+          "automatic": {
+            "kind": "effects",
+            "label": "执行预设安排",
+            "effects": [
+              {
+                "type_key": "proposal",
+                "id_from": "input.target",
+                "field": "allocation",
+                "operation": "set",
+                "value_from": "input.requested"
+              },
+              {
+                "type_key": "proposal",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "已安排"
+              }
+            ],
+            "next": "finish"
+          },
+          "review": {
+            "kind": "manual",
+            "label": "由管理员指定后续安排",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "approved": {
+                  "type": "boolean",
+                  "title": "是否采用"
+                },
+                "amount": {
+                  "type": "number",
+                  "minimum": 0,
+                  "title": "最终额度"
+                }
+              },
+              "required": [
+                "approved",
+                "amount"
+              ],
+              "additionalProperties": false
+            },
+            "locks": [
+              "input.target"
+            ],
+            "next": "choice"
+          },
+          "choice": {
+            "kind": "branch",
+            "label": "按管理员选择分支",
+            "condition": {
+              "left": {
+                "path": "answers.review.approved"
+              },
+              "op": "eq",
+              "right": {
+                "value": true
+              }
+            },
+            "yes": "adopt",
+            "no": "decline"
+          },
+          "adopt": {
+            "kind": "effects",
+            "label": "采用管理员安排",
+            "effects": [
+              {
+                "type_key": "proposal",
+                "id_from": "input.target",
+                "field": "allocation",
+                "operation": "set",
+                "value_from": "answers.review.amount"
+              },
+              {
+                "type_key": "proposal",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "已安排"
+              }
+            ],
+            "next": "finish"
+          },
+          "decline": {
+            "kind": "effects",
+            "label": "保留为未采用",
+            "effects": [
+              {
+                "type_key": "proposal",
+                "id_from": "input.target",
+                "field": "state",
+                "operation": "set",
+                "value": "未采用"
+              }
+            ],
+            "next": "finish"
+          },
+          "finish": {
+            "kind": "end",
+            "label": "处理完成",
+            "result": "提案已按当前规则或管理员决定处理。"
+          }
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "type_key": "proposal",
+      "data": {
+        "title": "布置公共讨论区",
+        "state": "草稿",
+        "allocation": 0
+      }
+    },
+    {
+      "type_key": "proposal",
+      "data": {
+        "title": "筹备下一次活动",
+        "state": "草稿",
+        "allocation": 0
+      }
+    }
+  ]
+}

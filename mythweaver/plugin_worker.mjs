@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [root, entry] = process.argv.slice(2);
+const [file, name] = entry.split(':');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+console.log = (...args) => console.error(...args);
+const plugin = await import(pathToFileURL(path.join(root, file)).href);
+const result = await plugin[name](input);
+const output = JSON.stringify(result);
+if (output === undefined) throw new Error('Plugin must return a JSON value');
+process.stdout.write(output);

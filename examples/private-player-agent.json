@@ -1,0 +1,148 @@
+{
+  "name": "示例 · 私聊资料站",
+  "description": "可选玩家 Agent 示例：查询自己的额度，消耗3点领取固定资料，特殊请求由管理员决定。qq:1/qq:2仅为本机试运行身份，没有绑定任何QQ会话。",
+  "policy": {
+    "player_agent_enabled": true,
+    "player_instructions": "这是资料站。领取一份公开资料消耗3点额度；可查询自己的资料与结果。特殊请求需要管理员裁决。没有随机奖励。"
+  },
+  "definition": {
+    "types": {
+      "account": {
+        "label": "个人资料账户",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "credits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "materials": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gm_note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "name",
+            "credits",
+            "materials",
+            "gm_note"
+          ],
+          "additionalProperties": false
+        },
+        "player_access": {
+          "owner_field": "owner",
+          "read_fields": [
+            "name",
+            "credits",
+            "materials"
+          ]
+        }
+      }
+    },
+    "interactions": {
+      "collect": {
+        "label": "领取公开资料",
+        "player_enabled": true,
+        "player_description": "从自己的账户消耗3点额度，领取一份公开资料；需要本人account记录ID。",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string",
+              "x-reference": {
+                "type_key": "account"
+              }
+            }
+          },
+          "required": [
+            "account"
+          ],
+          "additionalProperties": false
+        },
+        "mode": "rule",
+        "condition": {
+          "left": {
+            "entity": {
+              "id_from": "account",
+              "type_key": "account",
+              "field": "credits"
+            }
+          },
+          "op": "gte",
+          "right": {
+            "value": 3
+          }
+        },
+        "effects": [
+          {
+            "type_key": "account",
+            "id_from": "account",
+            "field": "credits",
+            "operation": "increment",
+            "value": -3
+          },
+          {
+            "type_key": "account",
+            "id_from": "account",
+            "field": "materials",
+            "operation": "append",
+            "value": "公开资料"
+          }
+        ]
+      },
+      "special": {
+        "label": "特殊请求",
+        "player_enabled": true,
+        "player_description": "规则之外的行动先交给管理员，不扣额度。",
+        "mode": "manual",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "type_key": "account",
+      "data": {
+        "owner": "qq:1",
+        "name": "示例玩家1",
+        "credits": 6,
+        "materials": [],
+        "gm_note": "仅管理员可见的备注1"
+      }
+    },
+    {
+      "type_key": "account",
+      "data": {
+        "owner": "qq:2",
+        "name": "示例玩家2",
+        "credits": 6,
+        "materials": [],
+        "gm_note": "仅管理员可见的备注2"
+      }
+    }
+  ]
+}
