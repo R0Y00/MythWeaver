@@ -213,7 +213,7 @@ def test_agent_discovers_runtime_then_creates_new_module_and_player_uses_it(serv
     cmd(service,game,'policy.update',{'version':0,'player_agent_enabled':True})
     def player_handler(request):
         body=json.loads(request.content)
-        assert 'evaluate_record' in body['messages'][1]['content']
+        assert any(m['role']=='user' and 'evaluate_record' in m['content'] for m in body['messages'])
         return httpx.Response(200,json={'choices':[{'message':{'tool_calls':[{'function':{'name':'submit_action','arguments':json.dumps({'interaction':'evaluate_record','data':{'record':row['id']}})}}]}}]})
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:real(transport=httpx.MockTransport(player_handler),**kw))
     receipt=asyncio.run(PlayerAgent(service,settings).turn(game['id'],'qq:1','计算我的协作评估','new-module'))

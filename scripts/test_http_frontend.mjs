@@ -39,7 +39,7 @@ assert.equal(calls[0].url,'/api/login');
 assert.match(calls[0].options.headers['Idempotency-Key'],pattern);
 assert.equal(calls[0].options.headers['X-MythWeaver'],'1');
 assert.equal(JSON.parse(calls[0].options.body).password,'dummy-test-password');
-const source=readFileSync(new URL('pages/management.tsx',root),'utf8');
+const source=readFileSync(new URL('pages/player-rehearsal.tsx',root),'utf8');
 assert.ok(source.includes('key:requestId()'));
 assert.ok(!source.includes('crypto.randomUUID()'));
 console.log('Passed: HTTPS UUID, HTTP getRandomValues fallback, legacy fallback uniqueness, HTTP login reaches fetch, player request IDs.');

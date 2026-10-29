@@ -28,6 +28,10 @@ def authoring_contract():
                    'version':'module.put.payload.version必须是最新game.version；成功修改定义后递增。inspect_runtime可重新查询。',
                    'validation':'写入前先validate_module检验完整manifest；校验不更改定义、记录或版本。'},
         'design_guidance':[
+            '管理员不必懂schema、插件或权限位；自行完成技术实现，只询问缺失的业务规则。导入说明不等于玩法已实现，按原文逐项说明已执行、仅说明、待资料或不在本次范围。',
+            '要求玩家先选择/确认的规则须持久记录待确认内容、明确确认/拒绝入口，并重新校验资源和版本。不得仅靠player_instructions禁止扣款；测试确认前/拒绝后无资源变化、确认后只执行一次。',
+            '玩家Agent内置request_gm可提交规则争议到GM待办（_review），始终pending，不受自由文字record模式影响，不执行结算。GM决定保存在工作台；不会自动通知QQ或自动执行待办中描述的修改。',
+            '自然语言测试可断言expect_action=none/applied/pending、expect_state_changed、expect_records记录JSON Pointer的精确值、回复不包含内容和字数。检查正常与不应执行的情况，不只检查成功词。',
             '聊天参与Agent不应以records为空推断隐藏状态不存在。公开上下文只放授权字段；服务端extension自己解析隐藏局次，不要求玩家模型读取秘密或提供不可见记录ID。',
             '每个交互player_description说明何时选择、参数如何从原话提取、简略跟进如何解释。schema避免无意义可选参数组合；多个交互语义清晰时无需强行合并。',
             '群聊须显式group_enabled；用simulate_actions的audience=group校验授权，再用simulate_conversation的audience=group测试真实自然语言连续多轮。只运行结构化行动不能宣称聊天已修复。',

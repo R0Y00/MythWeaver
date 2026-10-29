@@ -7,6 +7,7 @@ from .db import Channel, Command, Entity, EntityRevision, Event, Game, Submissio
 from .definitions import DomainError, schema_validate, validate_definition
 from .policy import check_participant, policy_for
 
+FREE_TEXT_SCHEMA={"type":"object","properties":{"text":{"type":"string","minLength":1,"maxLength":8000}},"required":["text"],"additionalProperties":False}
 
 def packed(row):
     from datetime import datetime
@@ -164,14 +165,16 @@ class Service:
             return result
         if kind == "submit":
             interaction = p["interaction"]
-            spec = game.definition.get("interactions", {}).get(interaction) if interaction != "_free" else None
-            if interaction != "_free" and (not spec or not spec.get("enabled", True)):
+            reserved=interaction in ('_free','_review')
+            spec = game.definition.get("interactions", {}).get(interaction) if not reserved else None
+            if not reserved and (not spec or not spec.get("enabled", True)):
                 raise DomainError("INTERACTION_UNAVAILABLE", "交互不存在或未启用")
             if actor != "admin" and spec and spec.get("allow_users") and actor not in spec["allow_users"]:
                 raise DomainError("INTERACTION_DENIED","你未获得此交互的执行权限",403)
-            schema_validate(spec.get("schema", {"type": "object"}) if spec else {"type": "object", "properties": {"text": {"type": "string", "maxLength": 8000}}, "required": ["text"], "additionalProperties": False}, p["data"])
+            schema_validate(spec.get("schema", {"type": "object"}) if spec else FREE_TEXT_SCHEMA, p["data"])
             validate_references(db,game,spec.get('schema',{}) if spec else {},p['data'])
             mode = spec.get("mode", "manual") if spec else policy_for(db,game.id)[0]["free_mode"]
+            if interaction=='_review':mode='manual'
             from .rules import targets,apply_effects
             dependencies=targets(db,game,spec or {},p["data"],actor)
             if spec and 'condition' in spec:

@@ -7,7 +7,8 @@ import httpx
 from pydantic import Field,ValidationError
 from sqlalchemy import select
 
-from .agent import Agent,SYSTEM,validate_commands
+from .agent import Agent,validate_commands
+from .agent_guidance import MANAGER_GUIDANCE
 from .agent_reads import tools as read_tools,read,MODELS as READ_MODELS
 from .db import AgentRun,HarnessTask,ToolExecution
 from .definitions import DomainError
@@ -76,9 +77,13 @@ DESCRIPTIONS.update(workspace_list='列出或按名称查找整个部署的游�
  workspace_delete='申请永久删除指定游戏及其全部关联数据库记录和QQ绑定。先查询真实名称与版本，confirmation必须为完整名称。不可删除当前任务所在空间，有实际运行任务时拒绝删除。',
  workspace_inspect='查看指定game_id的空间信息、可用工具及插件schema；后续用workspace_call操作该空间。',
  workspace_call='查询或申请修改另一个游戏空间。明确game_id、tool和arguments，使用目标空间真实工具协议；查询可直接运行，修改和代码操作由服务端审批。一次只操作一个目标，不允许嵌套。')
-DESCRIPTIONS['simulate_conversation']='按simulation_chat_limit预算用真实玩家模型连续处理自然语言消息，必须指定private/group受众和真实或管理员授权测试玩家。可逐条检查expect_interaction和expect_reply_contains，数据库全回滚、不发送QQ。这是验证聊天问题的工具；simulate_actions仅测结构化行动。会锁定游戏直到完成，插件外部副作用不能回滚。'
+DESCRIPTIONS['simulate_conversation']='用真实玩家模型连续测试自然语言。必须指定private/group受众和真实或管理员授权测试玩家。可检查expect_interaction、expect_action(none/applied/pending)、expect_state_changed、expect_records(id/path/expected)、expect_reply_contains/not_contains/max_chars。应验证正常与不应执行的情况、资源变化及秘密不公开；无预期只能观察，不算验收。数据库最终回滚，不发送QQ；会锁定该游戏，插件外部副作用不能回滚。'
 
-HARNESS_SYSTEM=SYSTEM.replace('只能围绕用户明确请求和当前游戏定义工作。','围绕管理员明确请求工作；当前游戏是默认上下文，不是跨空间权限边界。可以按请求管理其他游戏及平台规则。').replace('通过 prepare_plan 提交至多 8 个命令的原子变更计划，或在目标不明确时仅文字澄清。','通过 execute_commands 实际执行至多8项原子变更；目标不明确时澄清。').replace('执行代码/SQL或','直接执行SQL或').replace('发送 QQ 消息、','未经管理员明确授权发送 QQ 消息、')+'''
+HARNESS_SYSTEM=MANAGER_GUIDANCE+'''
+【实际工具协议与权限】
+当前请求者已通过平台管理员认证。实际修改由execute_commands或对应工具执行，模型输出不是执行权限。任意宿主代码通过审批后的可信插件安装，不能直接SQL或读取平台密钥；QQ发信须有管理员明确授权。
+创建新概念用运行时模块和工具契约；禁用的功能不能执行。不要猜参数、字段、表达式或文件路径。
+execute_commands的commands为[{kind,payload}]，最多8项原子提交；先inspect_capabilities读取实际schema。定义修改使用最新version，局部变更优先module.put，不用摘要覆盖完整定义。scope和game_id必须指向已确认目标。
 你配置的是聊天参与Agent，不只是结算函数。排查玩家聊天失败时，先读取实际交互schema、授权、玩家说明、玩家历史与插件协议，分清传输触发、自然语言决策、受众上下文、服务端结算四层。只改group_enabled、合并交互或添加“禁止反问”都不是根因证据。
 隐藏状态不应暴露给模型。records=[]不代表未开局；stateful extension可以由服务端读取隐藏局次，输入不要强制玩家提供不可见ID。玩家模型要有精确的player_description、最小且无歧义的schema、持久结果反馈和同一聊天的真实执行回执。多个明确可区分交互可以保留，不要无证据强制改成单入口。
 配置群聊必须检查player_enabled和group_enabled，并用实际group受众测试；不能用默认private模拟当成群聊验收。保留与其他群、私聊、其他玩家的上下文隔离，不通过公开整个秘密状态修复模型失忆。
@@ -159,6 +164,12 @@ class Harness:
         self.running={}
         self.agent=Agent(service,settings)
 
+    def system_prompt(self,db,game_id,rules):
+        from .policy import policy_for
+        instructions=policy_for(db,game_id)[0]['instructions']
+        return (HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+rules['agent_instructions']+
+                '\n当前游戏的管理员工作说明（只作用于本游戏，不因跨空间调用而套用到其他游戏）：\n'+instructions)
+
     def create(self,game_id,prompt,session_id=None,approval_mode=None):
         if not isinstance(prompt,str) or not prompt.strip():raise DomainError('INVALID_INPUT','任务描述无效')
         with self.store.session.begin() as db:
@@ -171,10 +182,10 @@ class Harness:
                 db.get(AgentSession,session_id).approval_mode=approval_mode
             history=context(db,session_id)
             from .platform_rules import read as read_platform
-            rules=read_platform(db)['rules'];global_instructions=rules['agent_instructions']
+            rules=read_platform(db)['rules']
             run=AgentRun(game_id=game_id,prompt=prompt,kind='harness',session_id=session_id)
             db.add(run);db.flush()
-            messages=[{'role':'system','content':HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+global_instructions},
+            messages=[{'role':'system','content':self.system_prompt(db,game_id,rules)},
                       {'role':'user','content':json.dumps({'game_id':game_id,'name':game.name,'version':game.version,
                           'note':'按需使用读取工具查询当前定义/状态，不推测缺少的数据。'},ensure_ascii=False)},
                       {'role':'user','content':(history+'\n\n' if history else '')+'本轮管理员请求：\n'+prompt}]
@@ -306,7 +317,7 @@ class Harness:
                             break
                         from .platform_rules import read as read_platform
                         rules=read_platform(db)['rules']
-                        messages=[{'role':'system','content':HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+rules['agent_instructions']},*task.messages[1:]]
+                        messages=[{'role':'system','content':self.system_prompt(db,game_id,rules)},*task.messages[1:]]
                         remaining=task.max_steps-task.step
                         if task.max_steps and remaining<=3:
                             messages=[*messages,{'role':'user','content':f'执行预算提示：本轮还剩{remaining}次模型请求。优先完成必要校验并给出最终答复，包含实际完成项、玩家入口及剩余限制；不要重复已通过的测试。未完成时用record_progress保存具体下一步，不能声称完成。'}]

@@ -168,7 +168,7 @@ def test_history_is_per_actor_and_old_answers_not_replayed(service,game,playgrou
         return httpx.Response(200,json={'choices':[{'message':{'content':'请确认要领取哪份资料？'}}]})
     mock_model(monkeypatch,handler)
     result=asyncio.run(player(service).turn(game['id'],'qq:1','先问一下','question'))
-    assert result['action'] is None and '未执行行动' in result['answer']
+    assert result['action'] is None and result['answer']=='请确认要领取哪份资料？'
     assert not service.snapshot(game['id'])['submissions']
 
 
@@ -190,7 +190,8 @@ def test_private_binding_prefix_routing_receipt_and_unbind(service,store,game,pl
     asyncio.run(bot.process_private(item))
     with store.session() as db:
         out=db.scalar(select(Outbox))
-        assert out.group_id=='private-1' and '当前可见状态' in out.text and 'B秘密背包' not in out.text
+        assert out.group_id=='private-1' and '当前可见状态' not in out.text and 'B秘密背包' not in out.text
+        assert 'type_key' not in out.text and a['id'] not in out.text
     command(service,game,'channel.unbind',{'group_id':'private-1'})
     assert bot.next_delivery() is None
 

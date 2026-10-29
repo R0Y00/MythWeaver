@@ -1,3 +1,5 @@
+> v0.9.7：修复玩家调试数据外露与私聊追问上下文，改进专用 Agent 工作提示、GM 待办和业务行为测试；网页试运行改为连续对话。后续只通过 Git 更新，不再发布更新包。[易用性与行为约束审查](docs/23-agent-usability-and-behavior-audit.md)。
+
 > v0.9.6：取消平台/游戏说明固定字数上限，开放任务轮数、超时、调用数和试玩数量预算（0不限）；放开模型输出与插件运行时限配置。[限制审计与使用方式](docs/22-instructions-and-configurable-budgets.md)。
 
 > v0.9.5：修复普通HTTP/DDNS访问时crypto.randomUUID不可用导致登录请求无法发出的问题，保留Web8001/OneBot8080独立端口。[原因与修复](docs/21-http-request-id-fix.md)。
@@ -28,11 +30,11 @@
 
 GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（公开仓库）。通过 Git 部署后，运行 `update-platform.bat` 可备份并更新；首次源码部署需要 Git、Python、Node.js 和 PostgreSQL 程序，详见部署文档。
 
-迁移到另一台 Windows：先阅读 [Windows 部署与数据迁移](docs/14-windows-deployment.md)。发布包解压后运行 `setup-windows.bat`，再运行 `start-platform.bat`；无须 Docker。NapCat 和机器人账号不再写死，支持后续单独配置。
+在其他 Windows 部署或迁移：阅读 [Windows 部署与数据迁移](docs/14-windows-deployment.md)，从 Git 获取代码。以后不再制作更新包；旧 ZIP 安装先备份迁移为 Git 部署。NapCat、配置、数据库和插件环境保留在本机。
 
 由管理员定义玩法的 AI 辅助多人互动游戏平台，以 QQ 为参与入口。管理员决定游戏有哪些概念、数据、规则、交互和功能；平台提供状态记录、权限、执行与 AI 辅助。
 
-当前阶段：v0.9.6，包含可调Agent预算、长说明、玩家聊天修复、跨空间管理、双端口和HTTP登录兼容。Windows 原生运行，NapCat 直接接入，无 Docker。
+当前阶段：v0.9.7，包含可调 Agent 预算、长说明、连续玩家对话、GM 待办、行为测试、跨空间管理、双端口和 HTTP 登录兼容。Windows 原生运行，NapCat 直接接入，无 Docker。
 
 本机入口：[http://127.0.0.1:8001](http://127.0.0.1:8001)（新安装默认；旧安装以 `.env` 为准，Web与OneBot端口必须不同）。管理员密码保存在 `.runtime/credentials.txt`（本机私有文件，已忽略版本管理）。
 

@@ -1,11 +1,11 @@
 # 在另一台 Windows 部署
 
-当前提供 Windows x64 原生部署包，不用 Docker，不安装系统数据库服务。平台默认仅本机访问；本次不包含公网发布、自动开机服务或 Linux 部署。
+当前通过 Git 发布代码，使用 Windows x64 原生环境，不用 Docker，不安装系统数据库服务。v0.9.7 起不再制作更新包。平台默认仅本机访问；自动开机服务和 Linux 部署不在本文范围。
 
 ## 新机器安装
 
 1. 安装 [Python 3.12 或以上 x64](https://www.python.org/downloads/windows/)。本轮实际测试版本为 Python 3.12；安装时启用 Python Launcher 或加入 PATH，也可手工指定 Python 路径。
-2. 解压 `MythWeaver-Windows.zip` 到可写目录，例如 `D:\MythWeaver`。不要放在 Program Files 等需要管理员写权限的目录，不要在 ZIP 中直接运行。
+2. 安装 Git 和 Node.js，在可写目录克隆仓库；准备 PostgreSQL 程序后进行安装，具体步骤见下节。不要把部署目录放在 Program Files 中。
 3. 双击 `setup-windows.bat`。它会新建 `.venv`、联网安装 `requirements.lock` 中的依赖、生成随机管理员密码与独立密钥、初始化项目专用 PostgreSQL。
 4. 双击 `start-platform.bat`，等待提示就绪后自动打开管理台；密码见 `.runtime\credentials.txt`。
 5. 在“模型管理”填写自己的服务商、密钥和模型，分配管理规划、讨论助手和玩家 Agent。新安装不含原机器的模型密钥或游戏数据。
@@ -119,7 +119,7 @@ NAPCAT_SCRIPT=D:\Tools\NapCat\napcat.quick.bat
 .venv\Scripts\python.exe scripts\local.py configure-napcat --napcat-config "D:\Tools\NapCat\config\onebot11_123456789.json"
 ```
 
-只修改名为 `mythweaver-local` 的反向 WebSocket 连接，保留其他连接，首次修改前备份原文件。连接地址使用配置的 API 端口和目标机新生成的 Token。重新启动平台及 NapCat，再在“连接与诊断”检查状态。`start-napcat.bat` 使用 `.env` 中的路径，旧机器原路径仍有兼容回退。
+只修改名为 `mythweaver-local` 的反向 WebSocket 连接，保留其他连接，首次修改前备份原文件。连接地址使用配置的 ONEBOT_PORT（默认 8080），以及目标机的 ONEBOT_TOKEN；不使用 Web 的 API_PORT。重新启动平台及 NapCat，再在“连接与诊断”检查状态。`start-napcat.bat` 使用 `.env` 中的路径，旧机器原路径仍有兼容回退。
 
 ## 迁移原机器数据
 
@@ -148,14 +148,14 @@ NAPCAT_SCRIPT=D:\Tools\NapCat\napcat.quick.bat
 
 ```powershell
 .venv\Scripts\python.exe scripts\windows.py rebuild-plugins
-.venv\Scripts\python.exe scripts\local.py start
+start-platform.bat
 ```
 
 重建会真实执行源插件代码、安装依赖和测试；只对自己信任的备份执行。原插件依赖若是旧机器绝对路径，需要修改为目标机可用的依赖再安装。重建失败不会被报告为全部完成。最后在管理台检查数据与规则、重新绑定实际 QQ，再开放玩家使用。
 
-## 从源码生成发布包
+## 历史发布包构建工具（不再用于后续更新）
 
-先构建前端，再运行：
+以下保留旧版本打包方式供历史维护；后续发布和更新走 Git，本次不生成更新包。旧工具使用方式：
 
 ```powershell
 .venv\Scripts\python.exe scripts\windows.py package --output .runtime\releases\MythWeaver-Windows.zip

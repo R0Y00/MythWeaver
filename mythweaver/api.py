@@ -57,6 +57,7 @@ class PlayerRequest(AgentRequest):
     actor: str = Field(pattern=r'^qq:[0-9]{1,25}$')
     key: str = Field(min_length=1,max_length=120)
     audience:Literal['private','group']='private'
+    conversation_id:str=Field(default='admin-rehearsal',min_length=1,max_length=60)
 
 
 def create_app(settings=None, store=None):
@@ -88,7 +89,7 @@ def create_app(settings=None, store=None):
             await bot.socket.close(code=1001)
         store.engine.dispose()
 
-    app = FastAPI(title="MythWeaver", version="0.9.6", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="MythWeaver", version="0.9.7", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service, app.state.bot, app.state.store = service, bot, store
 
     def launch_task(game_id,run_id):
@@ -160,7 +161,7 @@ def create_app(settings=None, store=None):
     @app.post('/api/games/{game_id}/player/turn')
     async def player_turn(game_id: str, body: PlayerRequest):
         # Administrative rehearsal uses exactly the player scope; sends no QQ messages.
-        return await bot.player_agent.turn(game_id,body.actor,body.prompt,body.key,audience=body.audience,conversation_id='admin-rehearsal')
+        return await bot.player_agent.turn(game_id,body.actor,body.prompt,body.key,audience=body.audience,conversation_id='web:'+body.conversation_id)
 
     @app.get('/api/games/{game_id}/player/records/{actor}')
     def player_records(game_id: str, actor: str,audience:Literal['private','group']='private'):
@@ -254,7 +255,7 @@ def create_app(settings=None, store=None):
     @app.get("/api/status")
     def status():
         selected=models.available()
-        return {"onebot": bot.status(), "version":"0.9.6", "agent": {"configured":bool(selected),
+        return {"onebot": bot.status(), "version":"0.9.7", "agent": {"configured":bool(selected),
                 "model":selected,"message":"管理助手已配置" if selected else "请在模型管理中分配管理规划模型"}}
 
     @app.get("/api/games")
