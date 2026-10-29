@@ -33,6 +33,16 @@
 - 依赖安装或网页构建失败：代码已经接入 Git，保留待完成标记。修复网络/环境问题后，**再次运行 `connect-git.bat`** 继续安装，不重做初始化。重试前会再次停止和备份；如果此时改了源码，会拒绝覆盖。
 - 接入成功但启动失败：按服务器错误处理，之后运行 `start-platform.bat`；不需要重新迁移。
 
+如果旧接入脚本曾出现 `console.py: error: unrecognized arguments`，参数中夹杂乱码或 `pause`，可能是运行中的批处理被 Git 替换后，Windows 从错误字节位置继续读取。接入/更新入口已修复：子程序返回后在同一条预解析命令中退出；批处理提示改用 ASCII，Git 工作区批处理统一 CRLF。
+
+可以先在原平台目录打开 PowerShell，绕过批处理启动：
+
+```powershell
+& ".\.venv\Scripts\python.exe" ".\scripts\console.py"
+```
+
+如果 Git 已接入成功，关闭服务器窗口后在该目录执行 `git pull --ff-only` 获取此次启动脚本修复，再正常启动。此处只是获取批处理修复的补救操作；日常更新仍用 `update-platform.bat` 安装依赖、构建和备份。若 Git 提示有本地修改，先保留并检查，不要强制 reset。
+
 极老版本如果网页端口仍为 8080 且未配置 ONEBOT_PORT，新版双端口会冲突。工具会提前提示，在原 `.env` 中明确分开，例如 `API_PORT=8001`、`ONEBOT_PORT=8080`，然后重试。工具不会暗改你的公网映射或 NapCat 地址。
 
 目录已有 Git 仓库或属于其他仓库时，不会强制重建、reset 或删除 Git 元数据。原版本缺必要运行文件、路径含不安全的目录联接、文件与目录重名时也会停止。
