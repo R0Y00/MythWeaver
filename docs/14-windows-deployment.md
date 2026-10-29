@@ -16,7 +16,7 @@
 
 客户端是浏览器，前端资源由同一个服务器提供；服务端更新并构建界面后，玩家刷新网页即可。浏览器不需要单独安装或更新。当前服务默认仅本机访问，远程玩家网页访问并未随 Git 更新自动开放。
 
-仓库只上传代码，保留现有 `.gitignore`，不要提交 `.env`、`.runtime`、NapCat 登录态或数据库。源码仓库为私有的 [R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)。另一台机器需登录有权限的 GitHub 账号；机器自己的配置、游戏、数据库和 NapCat 环境保持本机私有。
+仓库只上传代码，保留现有 `.gitignore`，不要提交 `.env`、`.runtime`、NapCat 登录态或数据库。源码仓库为公开的 [R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)。另一台机器可直接克隆，无需登录 GitHub；机器自己的配置、游戏、数据库和 NapCat 环境保持本机私有。
 
 首次获取源码：
 

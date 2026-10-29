@@ -24,7 +24,7 @@
 
 # MythWeaver
 
-GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（私有仓库）。通过 Git 部署后，运行 `update-platform.bat` 可备份并更新；首次源码部署需要 Git、Python、Node.js 和 PostgreSQL 程序，详见部署文档。
+GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（公开仓库）。通过 Git 部署后，运行 `update-platform.bat` 可备份并更新；首次源码部署需要 Git、Python、Node.js 和 PostgreSQL 程序，详见部署文档。
 
 迁移到另一台 Windows：先阅读 [Windows 部署与数据迁移](docs/14-windows-deployment.md)。发布包解压后运行 `setup-windows.bat`，再运行 `start-platform.bat`；无须 Docker。NapCat 和机器人账号不再写死，支持后续单独配置。
 
