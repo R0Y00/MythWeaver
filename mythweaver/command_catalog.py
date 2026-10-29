@@ -51,6 +51,8 @@ COMMANDS={
     'flow.cancel':(Cancel,'停止后续步骤，保留已提交结果'),
     'flow.redirect':(s.RedirectFlow,'管理员接管：修订上下文、跳到指定步骤并继续，不撤销已提交步骤'),
 }
+from .quality import DocumentPut
+COMMANDS['requirements.put']=(DocumentPut,'保存完整原文、条款到执行规则及验收场景的版本化映射；历史版本保留')
 
 
 def validate_command(kind,payload):

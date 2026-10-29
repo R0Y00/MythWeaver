@@ -39,9 +39,16 @@ class Submit(Input):
     data: dict
 
 
+class DecisionResume(Input):
+    id:str=Field(min_length=1,max_length=36)
+    version:int=Field(ge=1)
+    data:dict
+
+
 class Decision(Input):
     decision: str
     result: str = Field(min_length=1, max_length=8000)
+    resume_flow:DecisionResume|None=None
 
 
 class Binding(Input):
@@ -66,6 +73,7 @@ class CancelFlow(Input):
 
 
 class PolicyInput(Input):
+    gm_delivery:str|None=Field(default=None,pattern='^(none|private)$')
     version: int = Field(ge=0)
     paused: bool = False
     command_prefix: str | None = Field(default=None,min_length=1,max_length=30,pattern=r'^\S+$')

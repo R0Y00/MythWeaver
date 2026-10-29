@@ -95,6 +95,7 @@ def apply(service,db,game,spec,data,actor,run_id=None):
     try:
         result=service.plugins.invoke(game.id,config['plugin_key'],config['tool'],payload,actor=actor,db=db)
     except DomainError as exc:
+        if exc.code=='TRIAL_EXTERNAL_BLOCKED':raise
         raise DomainError('EXTENSION_FAILED','自定义处理器未成功执行，请管理员检查插件及授权',409) from None
     if not isinstance(result,dict) or set(result)-{'updates','messages','feedback'}:
         raise DomainError('INVALID_EXTENSION_RESULT','处理器仅可返回updates、messages及可选feedback')

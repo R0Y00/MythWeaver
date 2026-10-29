@@ -11,6 +11,7 @@ from .schemas import Input
 
 READ_ONLY={'query_records','query_events','inspect_flow','inspect_runtime','inspect_capabilities','list_controls','validate_module',
            'plugin_list','plugin_inspect','record_progress','finish_task','platform_rules_read','workspace_list','workspace_inspect'}
+READ_ONLY.update({'requirements_read','trial_list'})
 
 class ApprovalDecision(Input):
     decision:Literal['approve','reject']
@@ -34,6 +35,11 @@ def summary(name,arguments):
     if name=='workspace_call':return '操作目标游戏 '+arguments['game_id']+'：'+summary(arguments['tool'],arguments['arguments'])
     if name=='execute_commands':return arguments.get('explanation','修改游戏数据')[:1000]
     if name=='platform_rules_update':return '修改全平台运行规则'+('，同时覆盖各游戏对应设置' if arguments.get('apply_scope')=='all_games' else '（保留游戏单独覆盖）')
+    external='；允许运行可信插件，文件和网络副作用不能回滚' if arguments.get('allow_external') else '；默认禁止宿主插件，不发送QQ'
+    if name=='acceptance_run':return '运行业务说明第 '+str(arguments['revision'])+' 版的全部验收场景（正式数据库变化最终回滚）'+external
+    if name=='trial_create':return '创建持续隔离试玩：'+arguments.get('label','隔离试玩')+external
+    if name=='trial_turn':return '在隔离试玩中以 '+arguments['actor']+' 的身份处理一条消息；正式数据不改变，插件权限沿用该试玩空间设置'
+    if name=='trial_change':return ('重置到初始快照：' if arguments['action']=='reset' else '丢弃隔离试玩：')+arguments['id']+'；不修改正式游戏'
     return {'plugin_draft':'保存代码插件源码','plugin_install':'安装插件依赖、运行测试并按请求启用',
             'plugin_state':'调整插件启用状态','simulate_actions':'运行代码进行连续试玩（数据库最终回滚）',
             'simulate_conversation':'调用真实玩家模型进行'+arguments.get('audience','')+'连续聊天测试（数据库最终回滚）'}.get(name,'运行已安装插件工具：'+name)

@@ -4,9 +4,12 @@
 def authoring_contract():
     return {
         'types':{'allowed_fields':['label','enabled','schema','player_access'],
-                 'player_access':{'owner_field':'schema中的字符串字段','read_fields':['玩家可读的顶层字段'],'shared_write':False},
+                 'player_access':{'owner_field':'schema中的字符串字段','read_fields':['玩家可读的顶层字段'],'summary_fields':['初始上下文重点字段，必须属于read_fields；长文本和集合按需读取'],'shared_write':False},
                  'visibility':'private只给归属玩家读取；public给所有玩家读取，但仍仅暴露read_fields。秘密不得放在read_fields。'},
-        'interactions':{'allowed_fields':['label','enabled','schema','mode','response','allow_users','effects','condition','workflow','player_enabled','player_description','group_enabled','extension'],
+        'interactions':{'allowed_fields':['label','enabled','schema','mode','response','allow_users','effects','condition','workflow','player_enabled','player_description','group_enabled','extension','confirmation','gm_delivery'],
+                        'confirmation':{'prompt':'服务端显示的行动确认/报价文字。不可用模型输入提供未经验证的价格；动态报价先用读取/报价交互产生持久报价，再让执行交互引用报价记录。','ttl_seconds':600,'confirm_words':['确认'],'cancel_words':['取消']},
+                        'consent_contract':'需要确认时先返回confirmation_required，不执行effects/插件。玩家在同一身份、受众、会话明确回复confirm_words后平台直接执行，无需模型再次解释；取消/过期/相关版本变化均不执行。不要让模型代确认。必需选择参数用schema.required约束；缺项先问玩家。',
+                        'gm_delivery':'none默认；private在GM裁决后原子排队私聊通知，必须已有绑定，否则裁决保存失败并提示。游戏policy.gm_delivery控制_review和人工流程继续后的通知。',
                         'group_enabled':'默认false；明确批准在群里公开使用的交互才设true。群聊Agent只读取公开记录，不读取私聊历史、私有记录或裁决。',
                         'modes':{'manual':'裁决后执行','record':'只记录','fixed':'返回静态response','rule':'执行effects或extension','flow':'启动workflow'},
                         'response':'最多4000字符的固定文本，不执行表达式，不支持模板插值或条件。动态结果用extension处理器返回feedback；其他受众通知用messages。',
@@ -28,6 +31,9 @@ def authoring_contract():
                    'version':'module.put.payload.version必须是最新game.version；成功修改定义后递增。inspect_runtime可重新查询。',
                    'validation':'写入前先validate_module检验完整manifest；校验不更改定义、记录或版本。'},
         'design_guidance':[
+            '用requirements.put保存完整原文、条款到实现/场景的映射和修订版本。requirements_read列出原文未映射片段、失效实现和未验证条款；所有原文片段须登记，可显式out_of_scope但要说明原因。',
+            '整份游戏业务验收用acceptance_run运行文档中的所有用例，实际结果持久化；修改规则/说明/插件后证据失效。finish_task的verification_scope=business_acceptance要求当前报告ready。不能用一次插件测试宣布全说明已实现。',
+            'trial_create/trial_turn/trial_list/trial_change用于持续隔离试玩：保存随机结果和待确认状态，不重放聊天，不写正式数据，不投递QQ。默认禁止宿主插件，显式allow_external仍有文件/网络副作用。',
             '管理员不必懂schema、插件或权限位；自行完成技术实现，只询问缺失的业务规则。导入说明不等于玩法已实现，按原文逐项说明已执行、仅说明、待资料或不在本次范围。',
             '要求玩家先选择/确认的规则须持久记录待确认内容、明确确认/拒绝入口，并重新校验资源和版本。不得仅靠player_instructions禁止扣款；测试确认前/拒绝后无资源变化、确认后只执行一次。',
             '玩家Agent内置request_gm可提交规则争议到GM待办（_review），始终pending，不受自由文字record模式影响，不执行结算。GM决定保存在工作台；不会自动通知QQ或自动执行待办中描述的修改。',

@@ -1,4 +1,4 @@
-> v0.9.7：修复玩家调试数据外露与私聊追问上下文，改进专用 Agent 工作提示、GM 待办和业务行为测试；网页试运行改为连续对话。后续只通过 Git 更新，不再发布更新包。[易用性与行为约束审查](docs/23-agent-usability-and-behavior-audit.md)。
+> v0.10.0：新增业务原文与实现/测试覆盖表、持久玩家确认、GM 裁决私聊通知与显式继续、持续隔离试玩和按需读取。通过 Git 更新，不再发布更新包。[功能与使用边界](docs/25-business-coverage-consent-and-trials.md)。
 
 > v0.9.6：取消平台/游戏说明固定字数上限，开放任务轮数、超时、调用数和试玩数量预算（0不限）；放开模型输出与插件运行时限配置。[限制审计与使用方式](docs/22-instructions-and-configurable-budgets.md)。
 
@@ -36,7 +36,7 @@ GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（公开仓库�
 
 由管理员定义玩法的 AI 辅助多人互动游戏平台，以 QQ 为参与入口。管理员决定游戏有哪些概念、数据、规则、交互和功能；平台提供状态记录、权限、执行与 AI 辅助。
 
-当前阶段：v0.9.7，包含可调 Agent 预算、长说明、连续玩家对话、GM 待办、行为测试、跨空间管理、双端口和 HTTP 登录兼容。Windows 原生运行，NapCat 直接接入，无 Docker。
+当前阶段：v0.10.0，包含原文覆盖与版本验收、服务端玩家确认、GM 裁决闭环、持续隔离试玩、按需读取、跨空间管理和双端口。Windows 原生运行，NapCat 直接接入，无 Docker。
 
 本机入口：[http://127.0.0.1:8001](http://127.0.0.1:8001)（新安装默认；旧安装以 `.env` 为准，Web与OneBot端口必须不同）。管理员密码保存在 `.runtime/credentials.txt`（本机私有文件，已忽略版本管理）。
 

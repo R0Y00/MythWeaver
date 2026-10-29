@@ -48,7 +48,7 @@ class Service:
             from .game_admin import create_game_in
             return create_game_in(self,db,name,description)
 
-    def execute(self, db, game_id, actor, key, kind, payload):
+    def execute(self, db, game_id, actor, key, kind, payload,consent=None):
         if not key or len(key) > 120:
             raise DomainError("IDEMPOTENCY_REQUIRED", "需要有效的幂等键")
         game = self.game(db, game_id, lock=True)
@@ -72,7 +72,20 @@ class Service:
             from sqlalchemy import update
             from .db import Outbox
             db.execute(update(Outbox).where(Outbox.game_id==game_id,Outbox.group_id.like('private-%'),Outbox.status=='queued').values(status='cancelled'))
-        result = self.apply(db, game, actor, kind, payload)
+        spec=game.definition.get('interactions',{}).get(payload.get('interaction'),{}) if kind=='submit' else {}
+        if actor!='admin' and spec.get('confirmation'):
+            from .choices import prepare
+            from .player import AUDIENCE,CONVERSATION,validate_action
+            from .db import PlayerChoice
+            granted=db.get(PlayerChoice,consent) if consent else None
+            if not granted:
+                validate_action(db,game,actor,payload)
+                result=prepare(db,game,actor,payload,AUDIENCE.get(),CONVERSATION.get())
+            else:
+                if granted.game_id!=game_id or granted.actor!=actor or granted.status!='waiting' or granted.payload!=payload:
+                    raise DomainError('CONSENT_REQUIRED','该确认不属于本次行动',409)
+                result=self.apply(db,game,actor,kind,payload)
+        else:result = self.apply(db, game, actor, kind, payload)
         db.add(Command(game_id=game_id, actor=actor, key=key, digest=digest, result=result))
         return result
 
@@ -223,10 +236,19 @@ class Service:
                 if any(row.dependencies.get(k)!=v for k,v in extension_dependencies(db,game,spec,row.actor).items()):
                     raise DomainError('STATE_STALE','扩展读取范围已变化，请重新提交',409)
                 apply_effects(self,db,game,actor,spec,row.data,extension_actor=row.actor)
+            if p.get('resume_flow'):
+                if p['decision']!='applied':raise DomainError('INVALID_DECISION','拒绝裁决不能恢复后续流程')
+                resume=p['resume_flow'];flow=db.get(FlowRun,resume['id'])
+                if not flow or flow.game_id!=game.id or flow.actor!=row.actor:
+                    raise DomainError('FLOW_DENIED','只能恢复同一游戏、同一行动者的流程',403)
+                from .workflows import change
+                change(self,db,game,{**resume,'reason':'GM裁决：'+p['result']},notify=False)
             row.status, row.result = p["decision"], p["result"]
             row.version+=1
             self.remember_submission_version(db,row)
             self.event(db, game.id, actor, "submission.decided", {"id": row.id, "status": row.status, "result": row.result})
+            from .gm_delivery import enqueue
+            enqueue(self,db,game,row)
             return packed(row)
         raise DomainError("UNKNOWN_COMMAND", "不支持的操作")
 

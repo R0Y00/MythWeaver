@@ -80,7 +80,7 @@ class ChatStep(Input):
     message:str=Field(min_length=1,max_length=2000)
     expect_interaction:str|None=Field(default=None,max_length=80)
     expect_reply_contains:str|None=Field(default=None,max_length=500)
-    expect_action:Literal['none','applied','pending']|None=None
+    expect_action:Literal['none','applied','pending','confirmation_required','cancelled','expired','stale']|None=None
     expect_state_changed:bool|None=None
     expect_records:list[RecordCheck]=Field(default_factory=list)
     expect_reply_not_contains:list[str]=Field(default_factory=list)
@@ -101,6 +101,7 @@ def record_matches(db,game_id,check):
 
 
 class ConversationSimulation(Input):
+    allow_external:bool=False
     actor:str=Field(pattern=r'^qq:[0-9]{1,25}$')
     audience:Literal['private','group']
     messages:list[ChatStep]=Field(min_length=1)
@@ -122,6 +123,9 @@ async def simulate_conversation(service,settings,game_id,arguments):
         outer=connection.begin()
         scoped=SimpleNamespace(engine=service.store.engine,session=sessionmaker(bind=connection,expire_on_commit=False,join_transaction_mode='create_savepoint'))
         trial=Service(scoped);trial._plugins=Plugins(trial,service.plugins.root)
+        if not args.allow_external:
+            def blocked(*a,**kw):raise DomainError('TRIAL_EXTERNAL_BLOCKED','隔离测试默认不运行宿主插件。可信插件需管理员明确允许外部副作用',409)
+            trial._plugins.invoke=blocked
         player=PlayerAgent(trial,settings);steps=[]
         try:
             with scoped.session.begin() as db:trial.game(db,game_id,lock=True)

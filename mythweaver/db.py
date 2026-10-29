@@ -314,6 +314,56 @@ class ToolExecution(Base):
     created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=utcnow)
 
 
+class GameDocument(Base):
+    __tablename__='game_documents'
+    __table_args__=(UniqueConstraint('game_id','key','revision'),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid)
+    game_id:Mapped[str]=mapped_column(ForeignKey('games.id'),index=True)
+    key:Mapped[str]=mapped_column(String(80))
+    revision:Mapped[int]=mapped_column(Integer)
+    content:Mapped[dict]=mapped_column(JSONB)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=utcnow)
+
+
+class PlayerChoice(Base):
+    __tablename__='player_choices'
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid)
+    game_id:Mapped[str]=mapped_column(ForeignKey('games.id'),index=True)
+    actor:Mapped[str]=mapped_column(String(120))
+    audience:Mapped[str]=mapped_column(String(20))
+    conversation:Mapped[str]=mapped_column(String(80))
+    payload:Mapped[dict]=mapped_column(JSONB)
+    dependencies:Mapped[dict]=mapped_column(JSONB)
+    quote:Mapped[str]=mapped_column(String(8000))
+    status:Mapped[str]=mapped_column(String(24),default='waiting')
+    expires_at:Mapped[datetime]=mapped_column(DateTime(timezone=True))
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=utcnow)
+
+
+class GameTrial(Base):
+    __tablename__='game_trials'
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid)
+    game_id:Mapped[str]=mapped_column(ForeignKey('games.id'),index=True)
+    label:Mapped[str]=mapped_column(String(120))
+    version:Mapped[int]=mapped_column(Integer,default=1)
+    source_stamp:Mapped[str]=mapped_column(String(64))
+    allow_external:Mapped[bool]=mapped_column(Boolean,default=False)
+    baseline:Mapped[dict]=mapped_column(JSONB)
+    state:Mapped[dict]=mapped_column(JSONB)
+    turns:Mapped[list]=mapped_column(JSONB,default=list)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=utcnow)
+
+
+class AcceptanceRun(Base):
+    __tablename__='acceptance_runs'
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid)
+    game_id:Mapped[str]=mapped_column(ForeignKey('games.id'),index=True)
+    document_id:Mapped[str]=mapped_column(String(36))
+    config_stamp:Mapped[str]=mapped_column(String(64))
+    results:Mapped[dict]=mapped_column(JSONB,default=dict)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=utcnow)
+
+
 class Store:
     def __init__(self, url):
         self.engine = create_engine(url, pool_pre_ping=True)
@@ -366,6 +416,10 @@ class Store:
                 db.execute(text("ALTER TABLE inbox ADD COLUMN IF NOT EXISTS route VARCHAR(20) NOT NULL DEFAULT 'commands'"))
                 db.execute(text("UPDATE inbox SET route='agent' WHERE key LIKE :pattern"),{'pattern':'%:private-%'})
                 db.add(SchemaMigration(version=11))
+            if not db.get(SchemaMigration,12):
+                # Additive tables are created above: documents, player choices,
+                # persistent isolated trials and acceptance evidence.
+                db.add(SchemaMigration(version=12))
         # A crashed sender cannot know whether QQ accepted an in-flight message.
         with self.session.begin() as db:
             from sqlalchemy import update

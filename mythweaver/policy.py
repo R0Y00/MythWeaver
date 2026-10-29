@@ -3,7 +3,7 @@ from sqlalchemy import select
 from .db import GamePolicy, Participant
 from .definitions import DomainError
 
-DEFAULT_POLICY = {"paused":False,"command_prefix":"/mw","free_mode":"manual","allow_users":[],"instructions":"",
+DEFAULT_POLICY = {"paused":False,"command_prefix":"/mw","free_mode":"manual","allow_users":[],"instructions":"","gm_delivery":"none",
                   "player_agent_enabled":False,"player_instructions":""}
 
 

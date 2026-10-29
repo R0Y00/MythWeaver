@@ -21,6 +21,8 @@ from .task_checks import FinishTask
 from .platform_rules import UpdateRules
 from .instructions import InstructionRead
 from .workspaces import WorkspaceList,WorkspaceInspect,WorkspaceCall,WorkspaceCreate,WorkspaceDelete
+from .quality import QualityQuery,AcceptanceRequest
+from .trials import TrialCreate,TrialTurn,TrialChange
 
 
 class Draft(Input):
@@ -61,6 +63,7 @@ MODELS={'plugin_draft':Draft,'plugin_inspect':Inspect,'plugin_install':Install,'
 MODELS.update(workspace_list=WorkspaceList,workspace_inspect=WorkspaceInspect,workspace_call=WorkspaceCall,workspace_create=WorkspaceCreate,workspace_delete=WorkspaceDelete)
 MODELS['simulate_conversation']=ConversationSimulation
 MODELS['platform_rules_read']=InstructionRead
+MODELS.update(requirements_read=QualityQuery,acceptance_run=AcceptanceRequest,trial_list=Empty,trial_create=TrialCreate,trial_turn=TrialTurn,trial_change=TrialChange)
 DESCRIPTIONS={'platform_rules_read':'读取全平台消息触发、指令格式、全局Agent行为说明和版本。与当前游戏规则分开。',
  'platform_rules_update':'申请修改全平台运行规则。changes仅填实际要修改字段，apply_scope=all_games会清除对应游戏覆盖使其统一生效；需审批，不能修改审批策略或密钥。',
  'plugin_draft':'申请保存Python/Node代码插件新版本。manifest包含runtime、requirements、tools与tests；审批后保存，暂不运行代码。',
@@ -77,7 +80,13 @@ DESCRIPTIONS.update(workspace_list='列出或按名称查找整个部署的游�
  workspace_delete='申请永久删除指定游戏及其全部关联数据库记录和QQ绑定。先查询真实名称与版本，confirmation必须为完整名称。不可删除当前任务所在空间，有实际运行任务时拒绝删除。',
  workspace_inspect='查看指定game_id的空间信息、可用工具及插件schema；后续用workspace_call操作该空间。',
  workspace_call='查询或申请修改另一个游戏空间。明确game_id、tool和arguments，使用目标空间真实工具协议；查询可直接运行，修改和代码操作由服务端审批。一次只操作一个目标，不允许嵌套。')
-DESCRIPTIONS['simulate_conversation']='用真实玩家模型连续测试自然语言。必须指定private/group受众和真实或管理员授权测试玩家。可检查expect_interaction、expect_action(none/applied/pending)、expect_state_changed、expect_records(id/path/expected)、expect_reply_contains/not_contains/max_chars。应验证正常与不应执行的情况、资源变化及秘密不公开；无预期只能观察，不算验收。数据库最终回滚，不发送QQ；会锁定该游戏，插件外部副作用不能回滚。'
+DESCRIPTIONS['simulate_conversation']='用真实玩家模型连续测试自然语言。必须指定private/group受众和真实或管理员授权测试玩家。可检查expect_interaction、expect_action(none/applied/pending/confirmation_required/cancelled/expired/stale)、expect_state_changed、expect_records(id/path/expected)、expect_reply_contains/not_contains/max_chars。无预期不算验收；数据库最终回滚。默认不运行宿主插件，allow_external=true需管理员同意，文件网络副作用不能回滚。'
+DESCRIPTIONS.update(requirements_read='读取持久原文、历史版本条款映射、可执行规则关联、验收覆盖和未完成清单。key省略列出各文档最新版。用requirements.put命令更新，revision需最新。',
+    acceptance_run='按指定文档版本执行全部自然语言业务验收用例，持久保存实际报告。每条须有断言。规则或原文版本变化后旧报告失效。默认不运行宿主插件，allow_external=true需管理员明确允许。',
+    trial_list='列出持续隔离试玩空间、已保存对话与和初始状态的差异。',
+    trial_create='创建持久隔离试玩状态；不复制QQ投递，不覆盖正式数据。默认禁止宿主插件，允许外部副作用须明确allow_external=true。',
+    trial_turn='在指定试玩空间继续一次真实玩家模型对话，持久保存随机结果和状态，不重放历史，不修改正式数据或发送QQ。需要最新version和唯一key。',
+    trial_change='重置到试玩初始状态或丢弃空间，不影响正式游戏。需最新version。')
 
 HARNESS_SYSTEM=MANAGER_GUIDANCE+'''
 【实际工具协议与权限】
@@ -236,6 +245,24 @@ class Harness:
             from .instructions import platform_page
             with self.store.session() as db:
                 return platform_page(read_platform(db),args['instruction_offset'],args['instruction_limit'])
+        if name=='requirements_read':
+            from .quality import tool_read
+            return tool_read(self.service,game_id,args)
+        if name=='acceptance_run':
+            from .quality import run_acceptance
+            value=await run_acceptance(self.service,self.settings,game_id,args)
+            return {'id':value['id'],'key':value['key'],'revision':value['revision'],'acceptance':value['acceptance']|{
+                'scenarios':{key:{'passed':case['passed'],'checks':[s.get('checks',{}) for s in case['steps']]} for key,case in value['acceptance']['scenarios'].items()}},
+                'unmapped_source':value['unmapped_source'],'notice':value['notice']}
+        if name in ('trial_create','trial_list','trial_turn','trial_change'):
+            from . import trials
+            def brief(value):
+                turns=value.get('turns',[]);last=turns[-1] if turns else None
+                return {k:v for k,v in value.items() if k not in ('turns','changes')}|{'turn_count':len(turns),'change_count':len(value.get('changes',[])),
+                    'last_turn':{'prompt':last['prompt'],'answer':last['result']['answer'],'action':last['result']['action']} if last else None}
+            if name=='trial_turn':return brief(await trials.turn(self.service,self.settings,game_id,args))
+            if name=='trial_list':return {'trials':[brief(value) for value in trials.listing(self.service,game_id)['trials']]}
+            return brief((trials.create if name=='trial_create' else trials.change)(self.service,game_id,args))
         if name=='platform_rules_update':
             from .platform_rules import update
             from .instructions import platform_page

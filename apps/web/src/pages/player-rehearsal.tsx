@@ -36,7 +36,7 @@ export function PlayerRehearsal({snap,act,busy}:{snap:Snapshot;act:Act;busy:bool
       {!turns.length&&<div className="rehearsal-empty">在下面说一句话，看看玩家实际会收到什么。<br/><small>例如打个招呼、查询自己的情况，或尝试你已经配置的玩法。</small></div>}
       {turns.map((turn,index)=><div className="rehearsal-turn" key={index}>
         <div className="rehearsal-message player"><small>玩家</small><p>{turn.prompt}</p></div>
-        <div className="rehearsal-message assistant"><div className="rehearsal-meta"><strong>玩家助手</strong><Badge state={turn.receipt.action?.status==='pending'||turn.receipt.action?.flow_status==='waiting'?'pending':undefined}>{turn.receipt.action?.status==='pending'||turn.receipt.action?.flow_status==='waiting'?'等待GM裁决':turn.receipt.action?'行动已处理':'对话回复'}</Badge></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.receipt.answer}</ReactMarkdown>
+        <div className="rehearsal-message assistant"><div className="rehearsal-meta"><strong>玩家助手</strong><Badge state={turn.receipt.action?.status==='pending'||turn.receipt.action?.flow_status==='waiting'?'pending':undefined}>{turn.receipt.action?.status==='confirmation_required'?'等待玩家确认':turn.receipt.action?.status==='pending'||turn.receipt.action?.flow_status==='waiting'?'等待GM裁决':turn.receipt.action?.status==='applied'?'行动已处理':turn.receipt.action?'未执行本次行动':'对话回复'}</Badge></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.receipt.answer}</ReactMarkdown>
           <details className="rehearsal-debug"><summary>排查详情</summary><pre>{pretty(turn.receipt)}</pre></details>
         </div>
       </div>)}<div ref={end}/>

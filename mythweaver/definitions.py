@@ -54,7 +54,12 @@ def validate_definition(value):
                     from .player import validate_access
                     validate_access(spec)
             if section == "interactions":
-                allowed |= {"mode", "response", "allow_users", "effects", "condition", "workflow", "player_enabled", "player_description", "group_enabled", "extension"}
+                allowed |= {"mode", "response", "allow_users", "effects", "condition", "workflow", "player_enabled", "player_description", "group_enabled", "extension", "confirmation", "gm_delivery"}
+                if 'confirmation' in spec:
+                    from .choices import validate
+                    validate(spec['confirmation'])
+                if 'gm_delivery' in spec and spec['gm_delivery'] not in ('none','private'):
+                    raise DomainError('INVALID_DEFINITION','GM裁决投递方式只能是none或private')
                 if not isinstance(spec.get('group_enabled',False),bool):raise DomainError('INVALID_DEFINITION','群聊交互开关必须为布尔值')
                 if 'extension' in spec:
                     from .extensions import validate

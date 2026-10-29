@@ -176,7 +176,7 @@ def start(service,db,game,actor,p,submission_id=None):
     return packed(run)
 
 
-def change(service,db,game,p,cancel=False):
+def change(service,db,game,p,cancel=False,notify=True):
     if not cancel and p.get('fingerprint'):
         from .agent import fingerprint
         if fingerprint(db,game)!=p['fingerprint']:
@@ -215,6 +215,12 @@ def change(service,db,game,p,cancel=False):
         run.status,run.locks='running',[]
         run.version+=1
         advance(service,db,game,run,'admin')
+    from .policy import policy_for
+    if notify and policy_for(db,game.id)[0].get('gm_delivery')=='private':
+        from types import SimpleNamespace
+        from .gm_delivery import enqueue
+        text=run.result or ('流程已取消。' if cancel else 'GM已处理本次决定，流程已继续。'+('目前仍有下一项等待GM决定。' if run.status=='waiting' else ''))
+        enqueue(service,db,game,SimpleNamespace(interaction='_review',actor=run.actor,result=text,id=run.id))
     db.flush()
     from .service import packed
     return packed(run)

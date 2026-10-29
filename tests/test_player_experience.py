@@ -113,7 +113,7 @@ def test_player_model_receives_admin_guidance_separately_and_gm_tool(service,gam
         assert body['messages'][1]['role']=='system'
         assert '先问用途，选择后再处理。' in body['messages'][1]['content']
         assert '先问用途，选择后再处理。' not in body['messages'][2]['content']
-        assert {t['function']['name'] for t in body['tools']}=={'submit_action','request_gm'}
+        assert {t['function']['name'] for t in body['tools']}=={'submit_action','request_gm','read_player_records'}
         return httpx.Response(200,json={'choices':[{'message':{'content':'你好！'}}]})
     real=httpx.AsyncClient
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:real(transport=httpx.MockTransport(handler),**kw))

@@ -104,10 +104,10 @@ def test_player_data_budget_can_be_disabled_without_changing_instructions(servic
     service.command(game['id'],'policy.update',{'version':0,'player_agent_enabled':True},'enable')
     with service.store.session.begin() as db:update(db,0,{'player_data_context_chars':1})
     with service.store.session() as db:
-        with pytest.raises(DomainError) as error:view(service,db,service.game(db,game['id']),'qq:1')
+        with pytest.raises(DomainError) as error:view(service,db,service.game(db,game['id']),'qq:1',compact=True)
         assert error.value.code=='CONTEXT_TOO_LARGE'
     with service.store.session.begin() as db:update(db,1,{'player_data_context_chars':0})
-    with service.store.session() as db:assert view(service,db,service.game(db,game['id']),'qq:1')['records']==[]
+    with service.store.session() as db:assert view(service,db,service.game(db,game['id']),'qq:1',compact=True)['records']==[]
 
 
 def test_simulation_limits_are_administrator_configurable(service,game,monkeypatch):

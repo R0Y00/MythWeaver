@@ -9,7 +9,7 @@ export type Game={id:string;name:string;description:string;version:number;defini
 export type Entity={id:string;type_key:string;data:Record<string,unknown>;visibility:string;version:number;archived:boolean};
 export type Submission={version:number;id:string;interaction:string;actor:string;data:Record<string,unknown>;status:string;result:string|null;created_at:string};
 export type GameEvent={seq:number;kind:string;actor:string;payload:any;created_at:string};
-export type Policy={private_trigger?:string;group_trigger?:string;group_input?:string;prefix_requires_space?:boolean;version:number;paused:boolean;command_prefix:string;free_mode:string;allow_users:string[];instructions:string;player_agent_enabled:boolean;player_instructions:string};
+export type Policy={gm_delivery?:string;private_trigger?:string;group_trigger?:string;group_input?:string;prefix_requires_space?:boolean;version:number;paused:boolean;command_prefix:string;free_mode:string;allow_users:string[];instructions:string;player_agent_enabled:boolean;player_instructions:string};
 export type Snapshot={game:Game;entities:Entity[];submissions:Submission[];flows:FlowRun[];events:GameEvent[];channels:{group_id:string}[];policy:Omit<Policy,'version'>;policy_version:number};
 export type Status={version:string;onebot:{connected:boolean;bot_id:string;last_seen:number|null;pending_calls:number;generation:number};agent:{configured:boolean;model:string|null;message:string}};
 export type Act=(task:()=>Promise<unknown>,success?:string)=>Promise<boolean>;

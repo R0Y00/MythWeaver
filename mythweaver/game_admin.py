@@ -12,6 +12,7 @@ from .service import packed
 KINDS={'game.create','policy.update','participant.update','channel.bind','channel.unbind','checkpoint.create','checkpoint.restore',
        'blueprint.save','blueprint.create','blueprint.instantiate','game.clone','definition.migrate','entity.retire','entity.restore','flow.redirect','submission.revise',
        'module.put','module.state','module.remove'}
+KINDS.add('requirements.put')
 
 
 def bump(db,entity_id,version):
@@ -53,6 +54,9 @@ def retire(service,db,game,p,validate=True):
 
 
 def handle(service,db,game,kind,p):
+    if kind=='requirements.put':
+        from .quality import put
+        return put(service,db,game,p)
     if kind.startswith('module.'):
         from .modules import change
         return change(service,db,game,kind,p)

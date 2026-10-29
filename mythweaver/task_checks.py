@@ -20,13 +20,13 @@ class EvidenceCheck(Input):
 class FinishTask(Input):
     answer:str=Field(min_length=1,max_length=12000)
     checks:list[EvidenceCheck]=Field(min_length=1,max_length=12)
-    verification_scope:Literal['receipts','player_conversation']='receipts'
+    verification_scope:Literal['receipts','player_conversation','business_acceptance']='receipts'
 
 
 def verify(db,run_id,checks,verification_scope='receipts'):
     if len(json.dumps(checks,ensure_ascii=False,allow_nan=False))>14000:
         raise DomainError('INVALID_EVIDENCE','验收条件过长')
-    verified=[];chat_verified=False
+    verified=[];chat_verified=False;business_verified=False
     for raw in checks:
         check=EvidenceCheck.model_validate(raw)
         row=db.scalar(select(ToolExecution).where(ToolExecution.run_id==run_id,ToolExecution.call_id==check.call_id))
@@ -35,6 +35,15 @@ def verify(db,run_id,checks,verification_scope='receipts'):
         current=row.result
         value=row.result.get('value',{})
         if row.name=='workspace_call':value=value.get('result',{})
+        actual_business_tool=row.name=='acceptance_run' or (row.name=='workspace_call' and row.arguments.get('tool')=='acceptance_run')
+        if actual_business_tool and isinstance(value,dict) and value.get('acceptance',{}).get('ready'):
+            from .db import AcceptanceRun,GameDocument,Game
+            from .quality import report
+            evidence=db.get(AcceptanceRun,value['acceptance'].get('run_id'))
+            document=db.get(GameDocument,evidence.document_id) if evidence else None
+            if document:
+                current_report=report(db,db.get(Game,document.game_id),document)
+                business_verified=business_verified or current_report['acceptance']['ready']
         actual_chat_tool=row.name=='simulate_conversation' or (row.name=='workspace_call' and row.arguments.get('tool')=='simulate_conversation')
         if actual_chat_tool and isinstance(value,dict) and value.get('test_layer')=='player_model_conversation':
             steps=value.get('steps',[])
@@ -54,4 +63,6 @@ def verify(db,run_id,checks,verification_scope='receipts'):
         verified.append({'label':check.label,'call_id':row.call_id,'execution_id':row.id,'tool':row.name,'path':check.path,'passed':True})
     if verification_scope=='player_conversation' and not chat_verified:
         raise DomainError('CHAT_EVIDENCE_REQUIRED','聊天验收需引用真实玩家模型至少三轮、每轮含预期检查且全部通过的simulate_conversation回执；结构化行动不能替代',409)
+    if verification_scope=='business_acceptance' and not business_verified:
+        raise DomainError('BUSINESS_EVIDENCE_REQUIRED','整份说明验收须引用当前版本acceptance_run的就绪报告；原文无遗漏映射、关联实现有效、范围内每条规则的用例全部通过',409)
     return verified

@@ -69,6 +69,8 @@ def fingerprint(db, game):
              [(r.id,r.version,r.status) for r in db.scalars(select(FlowRun).where(FlowRun.game_id==game.id).order_by(FlowRun.id))],
              [c.group_id for c in db.scalars(select(Channel).where(Channel.game_id==game.id).order_by(Channel.group_id))],
              [(r.id,r.version) for r in db.scalars(select(RetiredEntity).where(RetiredEntity.game_id==game.id).order_by(RetiredEntity.id))]]
+    from .db import PlayerChoice
+    state.append([(r.id,r.status,r.expires_at.isoformat()) for r in db.scalars(select(PlayerChoice).where(PlayerChoice.game_id==game.id).order_by(PlayerChoice.id))])
     return hashlib.sha256(json.dumps(state).encode()).hexdigest()
 
 
