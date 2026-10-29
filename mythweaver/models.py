@@ -62,7 +62,7 @@ class Models:
                 except InvalidToken:
                     raise DomainError("KEY_UNREADABLE", "密钥无法解密，请重新填写；更换 SESSION_SECRET 会影响解密", 409) from None
                 return SimpleNamespace(llm_base_url=provider.base_url,llm_api_key=key,llm_model=route["model"],
-                                       max_tokens=route.get("max_tokens",4096),timeout=route.get("timeout",60),
+                                       max_tokens=route.get("max_tokens",4096),timeout=route.get("timeout",60) or None,
                                        token_parameter=provider.token_parameter,provider_id=provider.id)
         if self.settings.agent_configured:
             return SimpleNamespace(llm_base_url=validate_url(self.settings.llm_base_url),llm_api_key=self.settings.llm_api_key,

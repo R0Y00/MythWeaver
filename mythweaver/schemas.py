@@ -75,9 +75,9 @@ class PolicyInput(Input):
     group_input: str | None = Field(default=None,pattern='^(commands|agent)$')
     free_mode: str = 'manual'
     allow_users: list[str] = Field(default_factory=list,max_length=200)
-    instructions: str = Field(default='',max_length=4000)
+    instructions: str = ''
     player_agent_enabled: bool = False
-    player_instructions: str = Field(default='',max_length=4000)
+    player_instructions: str = ''
 
 
 class MemberInput(Input):

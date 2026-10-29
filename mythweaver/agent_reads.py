@@ -41,6 +41,8 @@ class ControlQuery(Input):
     limit: int = Field(default=10,ge=1,le=20)
     after: str | None = Field(default=None,max_length=36)
     id: str | None = Field(default=None,max_length=36)
+    instruction_offset:int=Field(default=0,ge=0)
+    instruction_limit:int=Field(default=8000,ge=1,le=10000)
 
 
 class ModuleValidation(Input):
@@ -108,8 +110,9 @@ def read(service,game_id,name,arguments):
         if name=='list_controls':
             if query.section=='policy':
                 from .policy import policy_for
+                from .instructions import page
                 policy,version=policy_for(db,game_id)
-                return {**policy,'version':version}
+                return {**page(policy,query.instruction_offset,query.instruction_limit),'version':version}
             model={'participants':Participant,'channels':Channel,'checkpoints':Checkpoint,'retired':RetiredEntity,'blueprints':Blueprint,'submissions':Submission,'player_turns':PlayerTurn}[query.section]
             statement=select(model)
             if model!=Blueprint:

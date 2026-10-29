@@ -13,8 +13,15 @@ class Rules(Input):
     private_trigger:Literal['prefix','all','disabled']='prefix'
     group_trigger:Literal['prefix','mention','all','disabled']='prefix'
     group_input:Literal['commands','agent']='commands'
-    agent_instructions:str=Field(default='',max_length=6000)
-    player_instructions:str=Field(default='',max_length=4000)
+    agent_instructions:str=''
+    player_instructions:str=''
+    agent_max_steps:int=Field(default=24,ge=0,le=2147483647,description='新任务及继续任务的模型请求轮数；0不限')
+    agent_timeout_seconds:int=Field(default=900,ge=0,description='本次任务运行超时秒数；0不限')
+    player_timeout_seconds:int=Field(default=90,ge=0,description='玩家模型决策总超时秒数；0不限。服务商单次请求超时独立')
+    agent_tool_calls_per_turn:int=Field(default=4,ge=0,description='单轮模型工具调用数；0不限')
+    player_data_context_chars:int=Field(default=40000,ge=0,description='玩家可见资料字符预算，不含说明；0不限')
+    simulation_action_limit:int=Field(default=20,ge=0,description='一次结构化试玩行动数；0不限')
+    simulation_chat_limit:int=Field(default=8,ge=0,description='一次自然语言试玩消息数；0不限')
 
 class RulesPatch(Input):
     command_prefix:str|None=Field(default=None,min_length=1,max_length=30,pattern=r'^\S+$')
@@ -22,8 +29,15 @@ class RulesPatch(Input):
     private_trigger:Literal['prefix','all','disabled']|None=None
     group_trigger:Literal['prefix','mention','all','disabled']|None=None
     group_input:Literal['commands','agent']|None=None
-    agent_instructions:str|None=Field(default=None,max_length=6000)
-    player_instructions:str|None=Field(default=None,max_length=4000)
+    agent_instructions:str|None=None
+    player_instructions:str|None=None
+    agent_max_steps:int|None=Field(default=None,ge=0,le=2147483647)
+    agent_timeout_seconds:int|None=Field(default=None,ge=0)
+    player_timeout_seconds:int|None=Field(default=None,ge=0)
+    agent_tool_calls_per_turn:int|None=Field(default=None,ge=0)
+    player_data_context_chars:int|None=Field(default=None,ge=0)
+    simulation_action_limit:int|None=Field(default=None,ge=0)
+    simulation_chat_limit:int|None=Field(default=None,ge=0)
 
 class UpdateRules(Input):
     version:int=Field(ge=0)
@@ -35,6 +49,7 @@ def read(db,lock=False):
     row=db.scalar(query.with_for_update() if lock else query)
     return {'version':row.version if row else 0,'rules':Rules.model_validate(row.value if row else {}).model_dump(),
             'notes':['这是平台默认值。游戏可单独覆盖触发规则；apply_scope=all_games仅清除本次所改字段的游戏覆盖。',
+                     '管理员/玩家说明不设固定字符上限，不会截断保存；执行预算和试玩数量可修改，0表示不限。模型上下文容量、请求包体和代码运行资源限制独立。',
                      '私聊无需指令：private_trigger=all；仍只接收绑定会话，且游戏须启用player_agent_enabled。',
                      '群聊自然语言：group_input=agent，group_trigger可选mention或all；游戏须启用玩家Agent，交互须单独group_enabled=true。群里不读取私聊记录、历史和裁决。',
                      '审批策略只由管理员在会话界面设置，不能通过平台规则工具或说明文字自行开启。']}

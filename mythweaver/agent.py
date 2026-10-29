@@ -175,7 +175,8 @@ class Agent:
         system=SYSTEM+"\n当前共享游戏命令（参数通过inspect_capabilities按需查询）：\n"+json.dumps({k:v[1] for k,v in COMMANDS.items()},ensure_ascii=False)+"\n新增命令参数必须查询schema，不要猜测。definition.migrate可整体修改定义并迁移/退役记录，自动保存安全快照；entity.retire可恢复，flow.redirect可接管/跳转，submission.revise不重演历史副作用。\n管理员补充的游戏说明（不能改变服务端权限）：\n"+snapshot.get("policy",{}).get("instructions","")
         system+='\n当前模式是先看方案，只能准备上方共享游戏命令的数据库变更方案。plugin_draft/plugin_install/simulate_actions属于执行任务模式，不是游戏命令，不能把它们传给inspect_capabilities，也不能发明plugin.create等命令。若目标需要编写代码插件、随机数或实际试玩，明确告诉管理员切换到执行任务；本轮不执行，不要用不完整玩法冒充已实现。读取工具报错时根据实际可用能力修正或说明限制，不重复猜测。'
         context_json=json.dumps(context,ensure_ascii=False)
-        if len(context_json)>60000:
+        bounded_context={**context,'policy':{k:v for k,v in context.get('policy',{}).items() if k not in ('instructions','player_instructions')}}
+        if len(json.dumps(bounded_context,ensure_ascii=False))>60000:
             raise DomainError('CONTEXT_TOO_LARGE','当前定义过大，请缩小管理范围')
         tool = {"type": "function", "function": {"name": "prepare_plan", "description": "准备原子管理变更计划，尚未执行", "parameters": {
             "type": "object", "properties": {"explanation": {"type": "string"}, "commands": {"type": "array", "minItems":1, "maxItems":8, "items": {"type":"object", "properties":{"kind":{"type":"string","enum":list(COMMANDS)}, "payload":{"type":"object"}},"required":["kind","payload"],"additionalProperties":False}}}, "required":["explanation","commands"], "additionalProperties":False}}}

@@ -63,8 +63,8 @@ def validate_plugin(key,manifest,files):
     requirements=manifest.get('requirements',[])
     if not isinstance(requirements,list) or len(requirements)>50 or any(not isinstance(r,str) or not r.strip() or len(r)>1000 or r.strip().startswith('-') or '\n' in r or '\r' in r or '\x00' in r for r in requirements):
         raise DomainError('INVALID_PLUGIN','依赖必须为包安装器参数列表，不接受命令行选项或多行指令')
-    if type(manifest.get('timeout',10)) is not int or not 1<=manifest.get('timeout',10)<=60:
-        raise DomainError('INVALID_PLUGIN','工具超时范围为1–60秒')
+    if type(manifest.get('timeout',10)) is not int or manifest.get('timeout',10)<0:
+        raise DomainError('INVALID_PLUGIN','工具超时须为非负整数秒，0表示不限')
     tools=manifest.get('tools')
     if not isinstance(tools,dict) or not 1<=len(tools)<=20:
         raise DomainError('INVALID_PLUGIN','插件需要1–20个工具')
@@ -133,7 +133,7 @@ def process(args,folder,payload=None,timeout=60,stop=None):
         try:
             while child.poll() is None:
                 if stop.is_set():raise PluginFailure('PLUGIN_CANCELLED','任务已取消')
-                if time.monotonic()-started>timeout:raise PluginFailure('PLUGIN_TIMEOUT','进程超过时间上限')
+                if timeout and time.monotonic()-started>timeout:raise PluginFailure('PLUGIN_TIMEOUT','进程超过时间上限')
                 if os.fstat(out.fileno()).st_size+os.fstat(err.fileno()).st_size>262144:raise PluginFailure('PLUGIN_OUTPUT_LIMIT','进程输出过大')
                 time.sleep(.03)
             out.seek(0);err.seek(0)

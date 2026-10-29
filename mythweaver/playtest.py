@@ -20,11 +20,14 @@ class Action(Input):
 class Simulation(Input):
     actor:str=Field(default='admin',pattern=r'^(admin|qq:[0-9]{1,25})$')
     audience:Literal['private','group']='private'
-    actions:list[Action]=Field(min_length=1,max_length=20)
+    actions:list[Action]=Field(min_length=1)
 
 
 def simulate(service,game_id,actor,actions,audience='private'):
     body=Simulation.model_validate({'actor':actor,'actions':actions,'audience':audience})
+    from .platform_rules import read as read_platform
+    with service.store.session() as db:limit=read_platform(db)['rules']['simulation_action_limit']
+    if limit and len(body.actions)>limit:raise DomainError('SIMULATION_LIMIT',f'结构化试玩超过当前{limit}步预算，可由管理员修改simulation_action_limit')
     if len(json.dumps(body.model_dump(),ensure_ascii=False))>60000:
         raise DomainError('SIMULATION_LIMIT','试玩输入超过60000字符')
     from .player import AUDIENCE,validate_action,view
@@ -44,6 +47,9 @@ def simulate(service,game_id,actor,actions,audience='private'):
                         result=service.execute(db,game_id,actor,'playtest:'+uuid4().hex,'submit',payload)
                         db.flush()
                         visible=view(service,db,game,actor) if actor!='admin' else None
+                        if visible is not None:
+                            from .instructions import page
+                            visible=page(visible,limit=2000)
                         step={'index':index+1,'ok':True,'action':payload,'result':result,'observation':visible}
                 except DomainError as exc:
                     step={'index':index+1,'ok':False,'code':exc.code,'message':exc.message}
@@ -73,7 +79,7 @@ class ChatStep(Input):
 class ConversationSimulation(Input):
     actor:str=Field(pattern=r'^qq:[0-9]{1,25}$')
     audience:Literal['private','group']
-    messages:list[ChatStep]=Field(min_length=1,max_length=8)
+    messages:list[ChatStep]=Field(min_length=1)
 
 
 async def simulate_conversation(service,settings,game_id,arguments):
@@ -84,6 +90,9 @@ async def simulate_conversation(service,settings,game_id,arguments):
     from .player import PlayerAgent
     from .plugins import Plugins
     args=ConversationSimulation.model_validate(arguments)
+    from .platform_rules import read as read_platform
+    with service.store.session() as db:limit=read_platform(db)['rules']['simulation_chat_limit']
+    if limit and len(args.messages)>limit:raise DomainError('SIMULATION_LIMIT',f'聊天试玩超过当前{limit}轮预算，可由管理员修改simulation_chat_limit')
     with service.store.engine.connect() as connection:
         outer=connection.begin()
         scoped=SimpleNamespace(engine=service.store.engine,session=sessionmaker(bind=connection,expire_on_commit=False,join_transaction_mode='create_savepoint'))

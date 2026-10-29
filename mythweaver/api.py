@@ -30,7 +30,7 @@ from .schemas import Login, NewGame, UpdateGame, Definition, EntityInput, Update
 
 
 class AgentRequest(Input):
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: str = Field(min_length=1)
     session_id: str | None = Field(default=None,min_length=1,max_length=36)
 
 
@@ -88,7 +88,7 @@ def create_app(settings=None, store=None):
             await bot.socket.close(code=1001)
         store.engine.dispose()
 
-    app = FastAPI(title="MythWeaver", version="0.9.5", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="MythWeaver", version="0.9.6", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service, app.state.bot, app.state.store = service, bot, store
 
     def launch_task(game_id,run_id):
@@ -205,7 +205,8 @@ def create_app(settings=None, store=None):
             if request.method not in ("GET", "HEAD"):
                 # Bound request parsing and schema evaluation memory.
                 body = await request.body()
-                limit=1048576 if '/plugins' in path else 131072
+                configuration=path=='/api/platform/rules' or path.endswith('/policy') or '/commands' in path or '/agent/' in path
+                limit=1048576 if '/plugins' in path or configuration else 131072
                 if len(body) > limit:
                     return JSONResponse({"code": "TOO_LARGE", "message": f"请求最多 {limit//1024} KB"}, status_code=413)
         response = await call_next(request)
@@ -253,7 +254,7 @@ def create_app(settings=None, store=None):
     @app.get("/api/status")
     def status():
         selected=models.available()
-        return {"onebot": bot.status(), "version":"0.9.5", "agent": {"configured":bool(selected),
+        return {"onebot": bot.status(), "version":"0.9.6", "agent": {"configured":bool(selected),
                 "model":selected,"message":"管理助手已配置" if selected else "请在模型管理中分配管理规划模型"}}
 
     @app.get("/api/games")

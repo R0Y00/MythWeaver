@@ -42,6 +42,19 @@ def installed(manager,game,runtime='python',**kwargs):
     return draft
 
 
+@pytest.mark.parametrize('timeout',[0,600])
+def test_plugin_timeout_can_be_unlimited_or_longer_than_sixty_seconds(timeout):
+    manifest,files=plugin();manifest['timeout']=timeout
+    assert validate_plugin('calculator',manifest,files)[0]['timeout']==timeout
+
+
+def test_unlimited_plugin_timeout_still_executes_and_returns_output(tmp_path):
+    import sys
+    from mythweaver.plugins import process
+    stdout,_=process([sys.executable,'-c','print("completed")'],tmp_path,timeout=0)
+    assert stdout.strip()=='completed'
+
+
 @pytest.mark.parametrize('runtime',['python','node'])
 def test_arbitrary_code_install_test_and_dynamic_tool_registration(manager,service,game,runtime):
     draft=installed(manager,game,runtime)

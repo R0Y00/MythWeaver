@@ -18,6 +18,7 @@ from .service import packed
 from .playtest import Simulation,ConversationSimulation
 from .task_checks import FinishTask
 from .platform_rules import UpdateRules
+from .instructions import InstructionRead
 from .workspaces import WorkspaceList,WorkspaceInspect,WorkspaceCall,WorkspaceCreate,WorkspaceDelete
 
 
@@ -58,6 +59,7 @@ MODELS={'plugin_draft':Draft,'plugin_inspect':Inspect,'plugin_install':Install,'
         'plugin_list':Empty,'execute_commands':Commands,'record_progress':Progress,'simulate_actions':Simulation,'finish_task':FinishTask,'platform_rules_read':Empty,'platform_rules_update':UpdateRules}
 MODELS.update(workspace_list=WorkspaceList,workspace_inspect=WorkspaceInspect,workspace_call=WorkspaceCall,workspace_create=WorkspaceCreate,workspace_delete=WorkspaceDelete)
 MODELS['simulate_conversation']=ConversationSimulation
+MODELS['platform_rules_read']=InstructionRead
 DESCRIPTIONS={'platform_rules_read':'读取全平台消息触发、指令格式、全局Agent行为说明和版本。与当前游戏规则分开。',
  'platform_rules_update':'申请修改全平台运行规则。changes仅填实际要修改字段，apply_scope=all_games会清除对应游戏覆盖使其统一生效；需审批，不能修改审批策略或密钥。',
  'plugin_draft':'申请保存Python/Node代码插件新版本。manifest包含runtime、requirements、tools与tests；审批后保存，暂不运行代码。',
@@ -67,14 +69,14 @@ DESCRIPTIONS={'platform_rules_read':'读取全平台消息触发、指令格式�
  'plugin_list':'列出当前空间插件、版本、启停状态和报告。',
  'execute_commands':'申请原子执行1–8项命令，审批通过后执行；自动同意由会话设置控制。格式必须是{explanation,commands:[{kind:"命令标识",payload:{命令参数}}]}。先查询schema；不调用prepare_plan。',
  'record_progress':'保存本任务已完成工作与下一步，作为持久化进度，不代表任务完成。',
- 'simulate_actions':'连续试玩1–20个已配置交互，检查实际结果及玩家可见状态。数据库最终回滚，不发QQ消息；可信插件真实运行，外部副作用不能回滚。actor=qq:数字时按玩家授权验证，admin仅作管理探测。',
+ 'simulate_actions':'按simulation_action_limit预算连续试玩已配置交互，检查实际结果及玩家可见状态。数据库最终回滚，不发QQ消息；可信插件真实运行，外部副作用不能回滚。actor=qq:数字时按玩家授权验证，admin仅作管理探测。',
  'finish_task':'以实际回执完成验收。checks引用本任务此前成功工具调用的call_id，以JSON Pointer指定字段和expected；服务端验证后才标为已验收。不能用record_progress或文字声明当证据。'}
 DESCRIPTIONS.update(workspace_list='列出或按名称查找整个部署的游戏空间，返回真实ID，支持after分页。当前会话不限制管理员操作其他空间。',
  workspace_create='申请创建新的空白游戏空间，审批后返回真实ID，可在同一会话用workspace_call配置。',
  workspace_delete='申请永久删除指定游戏及其全部关联数据库记录和QQ绑定。先查询真实名称与版本，confirmation必须为完整名称。不可删除当前任务所在空间，有实际运行任务时拒绝删除。',
  workspace_inspect='查看指定game_id的空间信息、可用工具及插件schema；后续用workspace_call操作该空间。',
  workspace_call='查询或申请修改另一个游戏空间。明确game_id、tool和arguments，使用目标空间真实工具协议；查询可直接运行，修改和代码操作由服务端审批。一次只操作一个目标，不允许嵌套。')
-DESCRIPTIONS['simulate_conversation']='用真实玩家模型连续处理1–8条自然语言消息，必须指定private/group受众和真实或管理员授权测试玩家。可逐条检查expect_interaction和expect_reply_contains，数据库全回滚、不发送QQ。这是验证聊天问题的工具；simulate_actions仅测结构化行动。会锁定游戏直到完成，插件外部副作用不能回滚。'
+DESCRIPTIONS['simulate_conversation']='按simulation_chat_limit预算用真实玩家模型连续处理自然语言消息，必须指定private/group受众和真实或管理员授权测试玩家。可逐条检查expect_interaction和expect_reply_contains，数据库全回滚、不发送QQ。这是验证聊天问题的工具；simulate_actions仅测结构化行动。会锁定游戏直到完成，插件外部副作用不能回滚。'
 
 HARNESS_SYSTEM=SYSTEM.replace('只能围绕用户明确请求和当前游戏定义工作。','围绕管理员明确请求工作；当前游戏是默认上下文，不是跨空间权限边界。可以按请求管理其他游戏及平台规则。').replace('通过 prepare_plan 提交至多 8 个命令的原子变更计划，或在目标不明确时仅文字澄清。','通过 execute_commands 实际执行至多8项原子变更；目标不明确时澄清。').replace('执行代码/SQL或','直接执行SQL或').replace('发送 QQ 消息、','未经管理员明确授权发送 QQ 消息、')+'''
 你配置的是聊天参与Agent，不只是结算函数。排查玩家聊天失败时，先读取实际交互schema、授权、玩家说明、玩家历史与插件协议，分清传输触发、自然语言决策、受众上下文、服务端结算四层。只改group_enabled、合并交互或添加“禁止反问”都不是根因证据。
@@ -82,6 +84,7 @@ HARNESS_SYSTEM=SYSTEM.replace('只能围绕用户明确请求和当前游戏定�
 配置群聊必须检查player_enabled和group_enabled，并用实际group受众测试；不能用默认private模拟当成群聊验收。保留与其他群、私聊、其他玩家的上下文隔离，不通过公开整个秘密状态修复模型失忆。
 修复聊天问题必须调用simulate_conversation，使用原始自然语言连续至少三轮（开始、简略跟进、再次跟进，另按需测重开/越界/结束）。检查每轮真实玩家模型的action、反馈与持久状态。simulate_actions和插件tests绕过了自然语言决策，最多证明结算函数可用，不能证明聊天修复。失败时如实报告失败层次，不得用无关通过项finish_task后宣称已修好。聊天修复结束调用finish_task时verification_scope必须为player_conversation，服务端要求被引用的真实聊天回执至少三轮、每轮有预期检查且全部通过。
 验收输出必须区分：配置静态检查、插件测试、结构化行动、真实玩家模型聊天、真实QQ收发。仅声明已验证的层次，不能预测玩家下一句一定得到某个方向反馈。不得在解释或测试报告中主动披露隐藏答案；管理员要求检查秘密时另行按请求说明。
+说明文本不设固定字符上限；不要因旧的4000/6000字限制拒绝保存。执行预算可用platform_rules_read/update读取修改，0表示不限；预算变更仍走审批。平台规则和policy说明过长时，读取结果含instruction_pages，须用instruction_offset/instruction_limit读完后再替换原文，不能把摘录当全文覆盖。模型服务商上下文与请求传输限制独立，遇到实际错误需如实反馈。
 创建新玩法先inspect_runtime，严格依照authoring_contract，不猜配置键或语法。先validate_module验证完整模块，再module.put。随机、动态反馈或复杂逻辑用测试过的代码插件，不把脚本写进response。同类参数错误反复发生时重新读契约并更换实现。
 实际完成执行目标后调用finish_task，从工具结果的receipt.call_id原样复制已成功调用的编号，不能猜编号；用具体结果字段进行验收，再给出answer说明。插件可检查/value/status=ready、/value/enabled=true；试玩可检查/value/steps/0/ok=true及实际反馈/状态。检查应对应用户目标，不能只挑无关读取。纯讨论或澄清可以普通答复，但只记为已回复，不是已验收。
 新玩法用simulate_actions批量连续试玩，检查反馈和状态，不逐个execute_commands提交测试污染实际数据。插件可返回feedback给行动者，无需额外QQ绑定；不要只保存last_feedback却让行动结果为空。尽早启用所需玩家授权，并核实player_enabled。完成测试后总结入口和限制，不反复重演同一验收。
@@ -89,7 +92,7 @@ HARNESS_SYSTEM=SYSTEM.replace('只能围绕用户明确请求和当前游戏定�
 当前是连续管理对话。优先理解管理员是在讨论、询问还是要求变更；讨论时直接回答，不因为有工具就执行。需要变更时用对应工具提交具体操作请求，服务端会暂停等待管理员批准；自动同意由管理员在会话设置，不由你开启。管理员可讨论后直接说按刚才方案修改，不需要切换模式或重复描述。不要在文字里反复要求“同意吗”，用工具产生可审批请求。管理员拒绝后尊重决定，不能立即重提同一操作；补充需求时按新要求调整。平台级消息格式、无需前缀和全局行为说明使用platform_rules_read/update，不要错误写进某个游戏。可以申请plugin_draft/plugin_install编写、安装和运行可信Python或Node代码插件。
 不要调用prepare_plan。本任务工具结果会持久记录，读到错误后可修复并继续；不能因提出计划就结束，也不能在未验证时宣布成功。
 每次模型请求都会重新发现启用插件的工具ext_插件标识__工具名。安装通过后可立即调用新工具。
-manifest格式：{label,description,runtime:python或node,requirements:[pip或npm包规格],timeout:1到60,
+manifest格式：{label,description,runtime:python或node,requirements:[pip或npm包规格],timeout:非负整数秒（0不限）,
  tools:{工具标识:{description,entry:相对文件路径:函数名,input_schema:对象JSONSchema,output_schema:JSONSchema,player_enabled:false}},
  tests:[{tool:工具标识,input:对象,expected:预期JSON结果}]}。
 files是相对路径到文本源码的映射。Python入口函数def name(data)返回JSON；Node使用export function name(data)返回JSON，可用async。
@@ -129,11 +132,11 @@ def context_window(messages):
     return [*messages[:3],notice,*suffix]
 
 
-def protocol_issue(message):
+def protocol_issue(message,max_calls=4):
     if not isinstance(message,dict):return 'INVALID_MODEL_RESPONSE'
     if message.get('_response_meta',{}).get('finish_reason')=='length':return 'MODEL_OUTPUT_TRUNCATED'
     calls=message.get('tool_calls',[])
-    if not isinstance(calls,list) or len(calls)>4:return 'INVALID_TOOL_BATCH'
+    if not isinstance(calls,list) or (max_calls and len(calls)>max_calls):return 'INVALID_TOOL_BATCH'
     if len(calls)>1 and any(c.get('function',{}).get('name')=='finish_task' for c in calls if isinstance(c,dict)):
         return 'FINISH_MUST_BE_SINGLE_CALL'
     if not calls:
@@ -157,7 +160,7 @@ class Harness:
         self.agent=Agent(service,settings)
 
     def create(self,game_id,prompt,session_id=None,approval_mode=None):
-        if not isinstance(prompt,str) or not 1<=len(prompt)<=8000:raise DomainError('INVALID_INPUT','任务描述无效')
+        if not isinstance(prompt,str) or not prompt.strip():raise DomainError('INVALID_INPUT','任务描述无效')
         with self.store.session.begin() as db:
             game=self.service.game(db,game_id,lock=True)
             from .sessions import attach,context
@@ -168,14 +171,14 @@ class Harness:
                 db.get(AgentSession,session_id).approval_mode=approval_mode
             history=context(db,session_id)
             from .platform_rules import read as read_platform
-            global_instructions=read_platform(db)['rules']['agent_instructions']
+            rules=read_platform(db)['rules'];global_instructions=rules['agent_instructions']
             run=AgentRun(game_id=game_id,prompt=prompt,kind='harness',session_id=session_id)
             db.add(run);db.flush()
             messages=[{'role':'system','content':HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+global_instructions},
                       {'role':'user','content':json.dumps({'game_id':game_id,'name':game.name,'version':game.version,
                           'note':'按需使用读取工具查询当前定义/状态，不推测缺少的数据。'},ensure_ascii=False)},
                       {'role':'user','content':(history+'\n\n' if history else '')+'本轮管理员请求：\n'+prompt}]
-            db.add(HarnessTask(id=run.id,game_id=game_id,messages=messages))
+            db.add(HarnessTask(id=run.id,game_id=game_id,messages=messages,max_steps=rules['agent_max_steps']))
             return run.id
 
     def inspect(self,game_id,run_id):
@@ -219,10 +222,13 @@ class Harness:
             raise DomainError('INVALID_TOOL_INPUT','工具参数校验失败；'+'；'.join(issues)) from None
         if name=='platform_rules_read':
             from .platform_rules import read as read_platform
-            with self.store.session() as db:return read_platform(db)
+            from .instructions import platform_page
+            with self.store.session() as db:
+                return platform_page(read_platform(db),args['instruction_offset'],args['instruction_limit'])
         if name=='platform_rules_update':
             from .platform_rules import update
-            with self.store.session.begin() as db:return update(db,args['version'],args['changes'],args['apply_scope'])
+            from .instructions import platform_page
+            with self.store.session.begin() as db:return platform_page(update(db,args['version'],args['changes'],args['apply_scope']))
         manager=self.service.plugins
         if name=='plugin_draft':
             result=await asyncio.to_thread(manager.draft,game_id,**args)
@@ -257,7 +263,11 @@ class Harness:
                 results=[]
                 with self.store.session.begin() as db:
                     for index,command in enumerate(commands):
-                        results.append(self.service.execute(db,game_id,'admin',f'harness:{execution_id}:{index}',command['kind'],command['payload']))
+                        result=self.service.execute(db,game_id,'admin',f'harness:{execution_id}:{index}',command['kind'],command['payload'])
+                        if command['kind']=='policy.update':
+                            from .instructions import page
+                            result=page(result)
+                        results.append(result)
                         db.flush()
                 return {'status':'applied','results':results,'explanation':args['explanation']}
             return await asyncio.to_thread(apply)
@@ -281,7 +291,9 @@ class Harness:
         self.running[run_id]=asyncio.current_task()
         started=time.monotonic()
         try:
-            async with asyncio.timeout(900):
+            from .platform_rules import read as read_platform
+            with self.store.session() as db:timeout=read_platform(db)['rules']['agent_timeout_seconds']
+            async with asyncio.timeout(timeout or None):
                 while True:
                     with self.store.session.begin() as db:
                         task=db.get(HarnessTask,run_id)
@@ -289,13 +301,14 @@ class Harness:
                         run=db.get(AgentRun,run_id)
                         if run.status!='running':return self.inspect(game_id,run_id)
                         continuing=bool(task.pending_calls)
-                        if task.step>=task.max_steps and not continuing:
+                        if task.max_steps and task.step>=task.max_steps and not continuing:
                             run.status,run.answer='budget_exhausted','本轮执行步数已用完，进度已保存，可继续任务。'
                             break
                         from .platform_rules import read as read_platform
-                        messages=[{'role':'system','content':HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+read_platform(db)['rules']['agent_instructions']},*task.messages[1:]]
+                        rules=read_platform(db)['rules']
+                        messages=[{'role':'system','content':HARNESS_SYSTEM+'\n全局管理员说明（不改变服务端审批和权限）：\n'+rules['agent_instructions']},*task.messages[1:]]
                         remaining=task.max_steps-task.step
-                        if remaining<=3:
+                        if task.max_steps and remaining<=3:
                             messages=[*messages,{'role':'user','content':f'执行预算提示：本轮还剩{remaining}次模型请求。优先完成必要校验并给出最终答复，包含实际完成项、玩家入口及剩余限制；不要重复已通过的测试。未完成时用record_progress保存具体下一步，不能声称完成。'}]
                         if not continuing:task.step+=1
                         pending_calls=task.pending_calls
@@ -307,11 +320,12 @@ class Harness:
                         with self.store.session.begin() as db:
                             run=db.get(AgentRun,run_id)
                             run.tool_trace=[*run.tool_trace,{'tool':'model.response',**meta}]
-                    issue=protocol_issue(message)
+                    max_calls=rules['agent_tool_calls_per_turn']
+                    issue=protocol_issue(message,max_calls)
                     if issue:
                         with self.store.session.begin() as db:
                             task=db.get(HarnessTask,run_id);run=db.get(AgentRun,run_id)
-                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。请仅输出1–4个格式完整且arguments为JSON对象字符串的工具调用；必要时拆分较大变更。不要重演此前成功的步骤。'}]
+                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。请输出格式完整且arguments为JSON对象字符串的工具调用，每轮数量限制为{max_calls or "不限"}；必要时拆分较大变更。不要重演此前成功的步骤。'}]
                             run.tool_trace=[*run.tool_trace,{'tool':'model.protocol','code':issue,'executed':False}]
                         continue
                     calls=message.get('tool_calls',[])
@@ -428,7 +442,9 @@ class Harness:
             from .db import utcnow
             run.followups=[*run.followups,{'prompt':prompt or '继续任务','created_at':utcnow().isoformat(),'previous_answer':run.answer,'previous_status':run.status}]
             run.answer=''
-            task.max_steps=task.step+24
+            from .platform_rules import read as read_platform
+            budget=read_platform(db)['rules']['agent_max_steps']
+            task.max_steps=min(task.step+budget,2147483647) if budget else 0
             run.status,run.error_code='running',None
 
     def discard_pending(self,db,task,code,message):

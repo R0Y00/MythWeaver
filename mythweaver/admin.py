@@ -138,10 +138,10 @@ def build_admin_router(store,service,settings,bot):
                 provider=db.get(ModelProvider,route.get("provider_id",""))
                 if not provider or not provider.enabled or route.get("model") not in provider.models:
                     raise DomainError("INVALID_CONFIG","请选择已启用服务商中的模型")
-                if type(route.get("max_tokens",4096)) is not int or not 256<=route.get("max_tokens",4096)<=16384:
-                    raise DomainError("INVALID_CONFIG","输出上限为 256–16384 tokens")
-                if type(route.get("timeout",60)) is not int or not 10<=route.get("timeout",60)<=120:
-                    raise DomainError("INVALID_CONFIG","超时为 10–120 秒")
+                if type(route.get("max_tokens",4096)) is not int or route.get("max_tokens",4096)<1:
+                    raise DomainError("INVALID_CONFIG","模型输出预算须为正整数，实际可用值以服务商为准")
+                if type(route.get("timeout",60)) is not int or route.get("timeout",60)<0:
+                    raise DomainError("INVALID_CONFIG","请求超时须为非负整数秒，0表示不限")
             if not config:
                 config=PlatformConfig(key="model_routing",value=body.routing,version=1)
                 db.add(config)

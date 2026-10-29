@@ -1,3 +1,5 @@
+> v0.9.6：取消平台/游戏说明固定字数上限，开放任务轮数、超时、调用数和试玩数量预算（0不限）；放开模型输出与插件运行时限配置。[限制审计与使用方式](docs/22-instructions-and-configurable-budgets.md)。
+
 > v0.9.5：修复普通HTTP/DDNS访问时crypto.randomUUID不可用导致登录请求无法发出的问题，保留Web8001/OneBot8080独立端口。[原因与修复](docs/21-http-request-id-fix.md)。
 
 > v0.9.4：Web默认8001、OneBot默认8080，独立监听和协议隔离；共享同一游戏状态与机器人连接，统一启动停止。[双端口配置](docs/20-split-web-and-onebot-listeners.md)。
@@ -30,7 +32,7 @@ GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（公开仓库�
 
 由管理员定义玩法的 AI 辅助多人互动游戏平台，以 QQ 为参与入口。管理员决定游戏有哪些概念、数据、规则、交互和功能；平台提供状态记录、权限、执行与 AI 辅助。
 
-当前阶段：v0.9.5，包含玩家聊天修复、跨空间管理、双端口和 HTTP 登录兼容。Windows 原生运行，NapCat 直接接入，无 Docker。
+当前阶段：v0.9.6，包含可调Agent预算、长说明、玩家聊天修复、跨空间管理、双端口和HTTP登录兼容。Windows 原生运行，NapCat 直接接入，无 Docker。
 
 本机入口：[http://127.0.0.1:8001](http://127.0.0.1:8001)（新安装默认；旧安装以 `.env` 为准，Web与OneBot端口必须不同）。管理员密码保存在 `.runtime/credentials.txt`（本机私有文件，已忽略版本管理）。
 

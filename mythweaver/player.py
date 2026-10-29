@@ -64,10 +64,12 @@ def view(service,db,game,actor):
         .order_by(Submission.created_at.desc()).limit(10))]
     flows=[{'id':r.id,'status':r.status} for r in db.scalars(select(FlowRun).where(FlowRun.game_id==game.id,FlowRun.actor==actor).order_by(FlowRun.created_at.desc()).limit(10))]
     from .platform_rules import read as platform_read
-    instructions=platform_read(db)['rules']['player_instructions']+'\n'+policy['player_instructions']
+    platform_rules=platform_read(db)['rules']
+    instructions=platform_rules['player_instructions']+'\n'+policy['player_instructions']
     public=AUDIENCE.get()=='group'
     result={'instructions':instructions+('\n当前在群聊，只能公开回复；私聊数据、私有历史不可读取。' if public else ''),'records':records,'interactions':interactions,'decisions':[] if public else decisions,'flows':[] if public else flows}
-    if len(json.dumps(result,ensure_ascii=False))>40000:
+    budget=platform_rules['player_data_context_chars']
+    if budget and len(json.dumps({key:value for key,value in result.items() if key!='instructions'},ensure_ascii=False))>budget:
         raise DomainError('CONTEXT_TOO_LARGE','当前玩家可见数据过大，请管理员缩小读取字段或记录范围',409)
     return result
 
@@ -180,7 +182,9 @@ class PlayerAgent:
             turn_id=row.id
         try:
             try:
-                async with asyncio.timeout(90):
+                from .platform_rules import read as platform_read
+                with self.store.session() as db:timeout=platform_read(db)['rules']['player_timeout_seconds']
+                async with asyncio.timeout(timeout or None):
                     for attempt in range(3):
                         message=await self.request(context,history,prompt)
                         try:
