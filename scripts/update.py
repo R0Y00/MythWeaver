@@ -29,6 +29,19 @@ def plan():
     if git('merge-base','--is-ancestor',old,target,check=False).returncode:
         raise SystemExit('Local and remote branches diverged. Resolve the Git history manually; no force reset was performed.')
     changed=git('diff','--name-only',old,target).stdout.splitlines()
+    # Legacy adoption preserves additional local files outside Git. A future
+    # upstream addition must not overwrite those files merely because ignored.
+    for name in git('diff','--no-renames','--diff-filter=A','--name-only','-z',old,target).stdout.split('\0'):
+        if not name:continue
+        path=ROOT/name
+        if not path.resolve().is_relative_to(ROOT.resolve()):
+            raise SystemExit('Update contains a path outside this installation; no files were changed.')
+        parents=[]
+        current=path.parent
+        while current!=ROOT:
+            parents.append(current);current=current.parent
+        if path.exists() or any(p.exists() and not p.is_dir() for p in parents):
+            raise SystemExit('新增上游文件与本机保留文件冲突：'+name+'。请先备份并处理该文件；平台未停止，文件未覆盖。')
     return old,target,changed
 
 

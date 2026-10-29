@@ -48,3 +48,23 @@ def test_update_refuses_diverged_history(repositories):
 def test_update_same_revision_is_noop(repositories):
     old,target,changed=update.plan()
     assert old==target and not changed
+
+
+def test_update_refuses_new_upstream_file_over_preserved_ignored_local_file(repositories):
+    publisher,deployed,git=repositories
+    (deployed/'.git/info/exclude').write_text('/notes.txt\n')
+    (deployed/'notes.txt').write_text('private local notes')
+    (publisher/'notes.txt').write_text('new upstream file')
+    git(publisher,'add','notes.txt');git(publisher,'commit','-m','new file');git(publisher,'push','origin','main')
+    with pytest.raises(SystemExit,match='冲突'):update.plan()
+    assert (deployed/'notes.txt').read_text()=='private local notes'
+
+
+def test_update_refuses_new_directory_over_ignored_local_file(repositories):
+    publisher,deployed,git=repositories
+    (deployed/'.git/info/exclude').write_text('/assets\n')
+    (deployed/'assets').write_text('local file')
+    (publisher/'assets').mkdir();(publisher/'assets/new.txt').write_text('upstream')
+    git(publisher,'add','.');git(publisher,'commit','-m','new directory');git(publisher,'push','origin','main')
+    with pytest.raises(SystemExit,match='冲突'):update.plan()
+    assert (deployed/'assets').read_text()=='local file'

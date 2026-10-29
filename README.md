@@ -30,6 +30,8 @@
 
 GitHub：[R0Y00/MythWeaver](https://github.com/R0Y00/MythWeaver)（公开仓库）。通过 Git 部署后，运行 `update-platform.bat` 可备份并更新；首次源码部署需要 Git、Python、Node.js 和 PostgreSQL 程序，详见部署文档。
 
+**以前解压部署的电脑：**下载 [connect-git.bat](https://raw.githubusercontent.com/R0Y00/MythWeaver/main/connect-git.bat)，放到原平台目录双击，一次接入 Git；保留原配置、数据库、插件和 NapCat，以后双击 `update-platform.bat` 更新。[详细步骤与失败处理](docs/24-legacy-install-git-adoption.md)。
+
 在其他 Windows 部署或迁移：阅读 [Windows 部署与数据迁移](docs/14-windows-deployment.md)，从 Git 获取代码。以后不再制作更新包；旧 ZIP 安装先备份迁移为 Git 部署。NapCat、配置、数据库和插件环境保留在本机。
 
 由管理员定义玩法的 AI 辅助多人互动游戏平台，以 QQ 为参与入口。管理员决定游戏有哪些概念、数据、规则、交互和功能；平台提供状态记录、权限、执行与 AI 辅助。

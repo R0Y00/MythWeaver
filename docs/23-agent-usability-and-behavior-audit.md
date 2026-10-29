@@ -125,5 +125,5 @@
 从本次开始不再制作新的更新包，代码通过 [GitHub 仓库](https://github.com/R0Y00/MythWeaver) 更新。
 
 - 已通过 Git 部署的 Windows：运行 `update-platform.bat`。现有脚本检查本地改动及分支关系，停止控制台、备份数据库、快进更新，需要时更新依赖并构建网页，然后重新进入控制台。
-- 旧压缩包目录没有 `.git` 的，不能只把 update-platform.bat 复制进去就使用 Git 更新。先按 [Windows 部署文档](14-windows-deployment.md) 备份并迁移为 Git 部署，保留自己的 `.env`、数据库、插件和 NapCat 配置；不要用 git reset --hard 覆盖旧目录或把整个旧环境上传到公开仓库。
+- 旧压缩包目录没有 `.git` 的，先使用一次性的 [connect-git.bat 接入工具](24-legacy-install-git-adoption.md)，在原路径备份并接入 Git，保留自己的 `.env`、数据库、插件和 NapCat 配置；不要用 git reset --hard 覆盖旧目录或把整个旧环境上传到公开仓库。
 - 本次变更不需要新的数据库表结构迁移；启动仍执行平台原有的版本迁移检查。

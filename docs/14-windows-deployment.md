@@ -24,7 +24,7 @@
 git clone https://github.com/R0Y00/MythWeaver.git
 ```
 
-仓库不包含 PostgreSQL 程序、前端构建产物或本机数据。从源码新部署时先准备 PostgreSQL 程序，再运行 `setup-windows.bat`，安装脚本会构建网页。已有 ZIP 部署不能在原目录重复执行 clone 或直接运行更新脚本；应先完整备份，再迁移为有远程跟踪分支的 Git 部署，不能强制覆盖现有数据。
+仓库不包含 PostgreSQL 程序、前端构建产物或本机数据。从源码新部署时先准备 PostgreSQL 程序，再运行 `setup-windows.bat`，安装脚本会构建网页。已有 ZIP 部署使用一次性的 [旧部署接入工具](24-legacy-install-git-adoption.md)：下载 `connect-git.bat` 放在原平台目录双击，即可备份并在原目录接入 Git，保留配置、数据库、插件和 NapCat。不要在原目录重复执行 clone。
 
 采用 Git clone 部署的机器安装 Git；首次从源码构建界面还需要 Node.js 和 PostgreSQL 程序（可复用初装包里的 PostgreSQL 程序路径）。在部署目录双击 `update-platform.bat`：
 
@@ -33,7 +33,7 @@ git clone https://github.com/R0Y00/MythWeaver.git
 3. Python 锁文件变化时安装依赖；前端变化时执行 npm ci 和构建。配置、数据、NapCat 和插件环境不通过 Git 覆盖。
 4. 更新完成后，同一个窗口进入服务器终端；关闭窗口即停止服务，不留独立后台实例。
 
-更新报告在 `.runtime\updates\时间戳\report.json`，包含原/新提交及备份路径。失败时停止，不自动降级数据库；按报告排查再恢复，不声称代码回退能够撤销数据库迁移。ZIP 解压目录不能直接 git pull，应先明确建立 Git 部署及跟踪分支；不要用强制 checkout 覆盖有本地修改的目录。
+更新报告在 `.runtime\updates\时间戳\report.json`，包含原/新提交及备份路径。失败时停止，不自动降级数据库；按报告排查再恢复，不声称代码回退能够撤销数据库迁移。ZIP 解压目录先运行 `connect-git.bat` 接入；不要用强制 checkout 覆盖有本地修改的目录。
 
 验证：Git 更新规划的本地远程仓库测试覆盖上游获取、工作区保护、分叉拒绝和无变化，共4项通过。服务器终端在隔离部署实例实际启动后，强制结束终端拥有进程，API 18080 与数据库 15543 均退出，原开发实例保持正常。完整远程仓库更新发布流程仍需在你的实际仓库上接入验收。
 
