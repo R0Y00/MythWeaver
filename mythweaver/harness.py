@@ -156,8 +156,10 @@ def context_window(messages):
 
 def protocol_issue(message,max_calls=4):
     if not isinstance(message,dict):return 'INVALID_MODEL_RESPONSE'
+    if message.get('_protocol_error'):return message['_protocol_error']
     if message.get('_response_meta',{}).get('finish_reason')=='length':return 'MODEL_OUTPUT_TRUNCATED'
-    calls=message.get('tool_calls',[])
+    calls=message.get('tool_calls')
+    if calls is None:calls=[]
     if not isinstance(calls,list) or (max_calls and len(calls)>max_calls):return 'INVALID_TOOL_BATCH'
     if len(calls)>1 and any(c.get('function',{}).get('name')=='finish_task' for c in calls if isinstance(c,dict)):
         return 'FINISH_MUST_BE_SINGLE_CALL'
@@ -334,14 +336,24 @@ class Harness:
                 async for chunk in response.aiter_bytes():
                     raw.extend(chunk)
                     if len(raw)>524288:raise DomainError('MODEL_RESPONSE_TOO_LARGE','模型响应超过512KB')
-                body=json.loads(raw)
-                message=body['choices'][0]['message']
-                return {**message,'_response_meta':{'finish_reason':body['choices'][0].get('finish_reason'),'usage':body.get('usage',{}),'model':body.get('model',selected.llm_model)}}
+                try:
+                    body=json.loads(raw)
+                    choice=body['choices'][0];message=choice['message']
+                    if not isinstance(message,dict):raise TypeError()
+                except (ValueError,KeyError,IndexError,TypeError):
+                    return {'_protocol_error':'INVALID_MODEL_RESPONSE'}
+                return {**message,'_response_meta':{'finish_reason':choice.get('finish_reason'),'usage':body.get('usage',{}),'model':body.get('model',selected.llm_model),'max_tokens':selected.max_tokens}}
+
+    def model_event(self,run_id,**event):
+        from .db import utcnow
+        with self.store.session.begin() as db:
+            run=db.get(AgentRun,run_id)
+            run.tool_trace=[*run.tool_trace,{**event,'at':utcnow().isoformat()}]
 
     async def run(self,game_id,run_id):
         if run_id in self.running:raise DomainError('TASK_BUSY','任务正在执行',409)
         self.running[run_id]=asyncio.current_task()
-        started=time.monotonic();stalls=0
+        started=time.monotonic();stalls=0;request_failures=0;handoff_stalls=0
         try:
             from .platform_rules import read as read_platform
             with self.store.session() as db:timeout=read_platform(db)['rules']['agent_timeout_seconds']
@@ -360,32 +372,54 @@ class Harness:
                             run.status,run.answer='budget_exhausted','本轮执行步数已用完，进度已保存，可继续任务。'
                             break
                         messages=[{'role':'system','content':self.system_prompt(db,game_id,rules)},*task.messages[1:]]
+                        messages[0]['content']+=f'\n本次每轮最多调用{rules["agent_tool_calls_per_turn"] or "不限数量的"}个工具；大段源码、规则和测试分开提交。finish_task和ask_admin必须各自独占一轮。'
                         remaining=task.max_steps-task.step
                         if task.max_steps and remaining<=3:
                             messages=[*messages,{'role':'user','content':f'执行预算提示：本轮还剩{remaining}次模型请求。优先完成必要校验并给出最终答复，包含实际完成项、玩家入口及剩余限制；不要重复已通过的测试。未完成时用record_progress保存具体下一步，不能声称完成。'}]
                         if not continuing:task.step+=1
+                        step=task.step
                         pending_calls=task.pending_calls
                         stored_tools=task.pending_tools
                     advertised_tools=stored_tools if continuing else self.tools(game_id)
-                    message={'tool_calls':pending_calls} if continuing else await self.request(context_window(messages),advertised_tools)
+                    if continuing:message={'tool_calls':pending_calls}
+                    else:
+                        self.model_event(run_id,tool='model.request',step=step)
+                        try:
+                            message=await self.request(context_window(messages),advertised_tools)
+                        except (httpx.TransportError,httpx.HTTPStatusError) as error:
+                            status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None
+                            retryable=status is None or status in (408,429) or status>=500
+                            code='MODEL_REQUEST_TIMEOUT' if isinstance(error,httpx.TimeoutException) else ('MODEL_HTTP_ERROR' if status else 'MODEL_CONNECTION_ERROR')
+                            request_failures+=1
+                            retrying=retryable and request_failures<3
+                            self.model_event(run_id,tool='model.retry',code=code,http_status=status,attempt=request_failures,retrying=retrying,executed=False)
+                            if not retrying:raise DomainError(code,'模型请求未成功，已保留实际执行进度',502) from None
+                            await asyncio.sleep(min(2**request_failures,8))
+                            continue
+                        request_failures=0
                     meta=message.get('_response_meta') if isinstance(message,dict) else None
                     if meta:
-                        with self.store.session.begin() as db:
-                            run=db.get(AgentRun,run_id)
-                            run.tool_trace=[*run.tool_trace,{'tool':'model.response',**meta}]
+                        self.model_event(run_id,tool='model.response',**meta)
                     max_calls=rules['agent_tool_calls_per_turn']
                     issue=protocol_issue(message,max_calls)
                     if issue:
                         stalls+=1
-                        if rules['agent_stall_limit'] and stalls>=rules['agent_stall_limit']:
-                            raise DomainError('MODEL_PROTOCOL_STALLED','模型连续返回无法执行的工具协议，已保存进度，请检查模型配置',409)
+                        stopped=bool(rules['agent_stall_limit'] and stalls>=rules['agent_stall_limit'])
                         with self.store.session.begin() as db:
                             task=db.get(HarnessTask,run_id);run=db.get(AgentRun,run_id)
-                            recovery='输出被模型服务截断。下一轮只调用一个小工具，不重复整份业务文档或大段测试，省略解释。将大任务拆成分别保存规则、分别准备场景、再验收。' if issue=='MODEL_OUTPUT_TRUNCATED' else '请输出格式完整且arguments为JSON对象字符串的工具调用。'
+                            recovery={
+                                'MODEL_OUTPUT_TRUNCATED':'输出被模型服务截断。下一轮只调用一个小工具，不重复整份业务文档或大段测试，省略解释。将大任务拆成分别保存规则、分别准备场景、再验收。',
+                                'FINISH_MUST_BE_SINGLE_CALL':'下一轮只调用finish_task，不能与其他工具一起调用；尚有工作先完成该工作，之后再单独验收。',
+                                'ASK_MUST_BE_SINGLE_CALL':'下一轮只调用ask_admin，不同时调用其他工具。',
+                                'INVALID_TOOL_BATCH':'下一轮只调用一个工具；剩余步骤等该工具实际回执后继续，不要将整个计划合成一轮。',
+                                'EMPTY_MODEL_RESPONSE':'上一轮既没有答复也没有工具调用。继续执行尚未完成的下一步；确实缺少业务决定时调用ask_admin，已完成则单独finish_task引用真实回执。',
+                            }.get(issue,'请输出格式完整且arguments为JSON对象字符串的工具调用。先读取工具schema，下一轮只提交最小必要参数；不要将代码或JSON参数直接当作答复。')
                             task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。{recovery}每轮数量限制为{max_calls or "不限"}；不要重演此前成功的步骤。'}]
-                            run.tool_trace=[*run.tool_trace,{'tool':'model.protocol','code':issue,'executed':False}]
+                        self.model_event(run_id,tool='model.protocol',code=issue,attempt=stalls,limit=rules['agent_stall_limit'],retrying=not stopped,executed=False)
+                        if stopped:raise DomainError('MODEL_PROTOCOL_STALLED','模型连续返回无法执行的工具协议，已保存进度',409)
                         continue
-                    calls=message.get('tool_calls',[])
+                    stalls=0
+                    calls=message.get('tool_calls') or []
                     if not calls:
                         answer=message.get('content')
                         if not isinstance(answer,str) or not answer.strip():raise DomainError('INVALID_MODEL_RESPONSE','模型没有返回有效结果')
@@ -399,12 +433,13 @@ class Harness:
                                 run.answer=answer[:16000]
                             else:run.answer,run.status=answer[:16000],'answered'
                         if needs_handoff:
-                            stalls+=1
-                            if rules['agent_stall_limit'] and stalls>=rules['agent_stall_limit']:
+                            handoff_stalls+=1
+                            self.model_event(run_id,tool='model.handoff',code='PLAYER_HANDOFF_REQUIRED',attempt=handoff_stalls,retrying=not (rules['agent_stall_limit'] and handoff_stalls>=rules['agent_stall_limit']))
+                            if rules['agent_stall_limit'] and handoff_stalls>=rules['agent_stall_limit']:
                                 raise DomainError('PLAYER_HANDOFF_REQUIRED','模型连续结束答复但未完成玩家配置交接，已保存进度，请核对模型或工作说明',409)
                             continue
                         break
-                    stalls=0
+                    stalls=0;handoff_stalls=0
                     seen=set()
                     for call in calls:
                         try:

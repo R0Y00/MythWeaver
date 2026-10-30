@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test:agent": "node scripts/test-agent-progress.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.63.0",
