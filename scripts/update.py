@@ -1,6 +1,7 @@
 """Fast-forward a tracked Git branch, preserving local state and returning to server console."""
 import argparse
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,8 +13,37 @@ sys.path.insert(0,str(ROOT))
 from scripts import local as runtime
 
 
+class GitUpdateError(RuntimeError):pass
+
+
+def safe_git_text(value):
+    value=re.sub(r'(https?://)[^/\s@]+@',r'\1[credentials hidden]@',value)
+    return re.sub(r'(?i)([?&](?:token|access_token|api_key|password)=)[^&\s]+',r'\1[hidden]',value)
+
+
+def git_error(args,result):
+    detail=safe_git_text((result.stderr or result.stdout or 'Git did not return an error description.').strip())
+    lower=detail.lower()
+    if any(s in lower for s in ('certificate','ssl')):
+        hint='请检查系统时间、证书或代理证书配置；不要关闭 SSL 验证。'
+    elif any(s in lower for s in ('could not resolve','failed to connect','timed out','connection reset','unable to access','proxy')):
+        hint='请检查这台电脑访问 GitHub 的网络及 Git 代理设置。不要为了重试而关闭 SSL 验证，也不要清除未知的代理配置。'
+    elif 'dubious ownership' in lower:
+        hint='Git 不信任当前目录的所有者。确认这是自己的部署目录后，再按 Git 上面的提示仅信任该目录。'
+    elif any(s in lower for s in ('authentication','repository not found','permission denied (publickey)','could not read username')):
+        hint='请检查 origin 仓库地址及访问权限。公开仓库地址应为 https://github.com/R0Y00/MythWeaver.git 。'
+    elif any(s in lower for s in ('index.lock','cannot lock','permission denied','access is denied')):
+        hint='请检查目录写入权限及是否有其他 Git 操作正在进行；不要直接删除锁文件。'
+    else:hint='请根据上面的 Git 原始错误处理。需要协助时发送这段错误，不要发送 .env、密码或 API key。'
+    stage='拉取更新失败，尚未停止平台或替换代码。' if args and args[0]=='fetch' else 'Git 操作失败。'
+    return f'{stage}\nGit 退出码：{result.returncode}\n\n{detail}\n\n{hint}'
+
+
 def git(*args,check=True):
-    return subprocess.run(['git',*args],cwd=ROOT,text=True,encoding='utf-8',errors='replace',capture_output=True,check=check)
+    try:result=subprocess.run(['git',*args],cwd=ROOT,text=True,encoding='utf-8',errors='replace',capture_output=True,check=False)
+    except FileNotFoundError:raise GitUpdateError('找不到 Git。请安装 Git for Windows 后重新打开更新脚本。') from None
+    if check and result.returncode:raise GitUpdateError(git_error(args,result))
+    return result
 
 
 def plan():
@@ -101,7 +131,23 @@ def update(no_start=False):
         subprocess.run([sys.executable,str(ROOT/'scripts/console.py')],cwd=ROOT,check=True)
 
 
+def main(arguments=None):
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--no-start',action='store_true')
+    options=parser.parse_args(arguments)
+    try:update(options.no_start)
+    except GitUpdateError as exc:
+        message=str(exc)
+        print(message,file=sys.stderr)
+        try:
+            folder=ROOT/'.runtime';folder.mkdir(exist_ok=True)
+            log=folder/'update-error.log';log.write_text(message+'\n',encoding='utf-8')
+            print('错误记录：'+str(log),file=sys.stderr)
+        except OSError:pass
+        return 1
+    return 0
+
+
 if __name__=='__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--no-start',action='store_true')
-    update(parser.parse_args().no_start)
+    sys.stderr.reconfigure(encoding='utf-8')
+    raise SystemExit(main())

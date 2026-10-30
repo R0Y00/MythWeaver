@@ -68,3 +68,28 @@ def test_update_refuses_new_directory_over_ignored_local_file(repositories):
     git(publisher,'add','.');git(publisher,'commit','-m','new directory');git(publisher,'push','origin','main')
     with pytest.raises(SystemExit,match='冲突'):update.plan()
     assert (deployed/'assets').read_text()=='local file'
+
+
+def test_fetch_failure_displays_original_error_and_does_not_stop_platform(repositories,monkeypatch,capsys):
+    _,deployed,git=repositories
+    git(deployed,'remote','set-url','origin',str(deployed/'missing-remote.git'))
+    monkeypatch.setattr(update.runtime,'stop',lambda:pytest.fail('Fetch failure must not stop the platform'))
+    monkeypatch.setattr(update.runtime,'start_database',lambda:pytest.fail('Fetch failure must not start a database'))
+    assert update.main(['--no-start'])==1
+    output=capsys.readouterr().err
+    assert '尚未停止平台或替换代码' in output and 'does not appear to be a git repository' in output
+    assert 'Traceback' not in output and 'does not appear to be a git repository' in (deployed/'.runtime/update-error.log').read_text(encoding='utf-8')
+    assert (deployed/'code.txt').read_text()=='v1'
+
+
+def test_git_error_masks_credentials_and_explains_network_failure():
+    result=subprocess.CompletedProcess([],128,stdout='',stderr='fatal: unable to access https://user:secret@example.test/repo?token=private: Could not resolve host')
+    message=update.git_error(('fetch','origin'),result)
+    assert 'secret' not in message and 'private' not in message
+    assert 'Could not resolve host' in message and '网络' in message
+
+
+def test_unchecked_git_exit_status_is_preserved(monkeypatch):
+    result=subprocess.CompletedProcess([],1,stdout='',stderr='not an ancestor')
+    monkeypatch.setattr(update.subprocess,'run',lambda *args,**kwargs:result)
+    assert update.git('merge-base','--is-ancestor','a','b',check=False).returncode==1
