@@ -4,8 +4,8 @@ import {api,useResource} from '../api';
 import type {Act} from '../types';
 import {Alert,Loading,PageTitle,Panel,Toggle} from '../ui';
 
-type BudgetKey='agent_max_steps'|'agent_timeout_seconds'|'player_timeout_seconds'|'agent_tool_calls_per_turn'|'player_read_steps'|'player_data_context_chars'|'simulation_action_limit'|'simulation_chat_limit';
-const budgets:{key:BudgetKey;label:string}[]=[{key:'agent_max_steps',label:'任务模型轮数'},{key:'agent_timeout_seconds',label:'任务超时（秒）'},{key:'player_timeout_seconds',label:'玩家决策超时（秒）'},{key:'agent_tool_calls_per_turn',label:'每轮工具调用数'},{key:'player_read_steps',label:'玩家读取模型轮数'},{key:'player_data_context_chars',label:'玩家数据上下文字符预算（说明不计入）'},{key:'simulation_action_limit',label:'结构化试玩步数'},{key:'simulation_chat_limit',label:'聊天试玩轮数'}];
+type BudgetKey='agent_max_steps'|'agent_timeout_seconds'|'player_timeout_seconds'|'agent_tool_calls_per_turn'|'agent_stall_limit'|'player_action_limit'|'player_read_steps'|'player_data_context_chars'|'simulation_action_limit'|'simulation_chat_limit';
+const budgets:{key:BudgetKey;label:string}[]=[{key:'agent_max_steps',label:'任务模型轮数'},{key:'agent_timeout_seconds',label:'任务超时（秒）'},{key:'player_timeout_seconds',label:'玩家决策超时（秒）'},{key:'agent_tool_calls_per_turn',label:'每轮工具调用数'},{key:'agent_stall_limit',label:'连续无有效进展响应预算'},{key:'player_action_limit',label:'玩家单条消息行动数'},{key:'player_read_steps',label:'玩家读取模型轮数'},{key:'player_data_context_chars',label:'玩家数据上下文字符预算（说明不计入）'},{key:'simulation_action_limit',label:'结构化试玩步数'},{key:'simulation_chat_limit',label:'聊天试玩轮数'}];
 type Rules=Record<BudgetKey,number>&{command_prefix:string;prefix_requires_space:boolean;private_trigger:string;group_trigger:string;group_input:string;agent_instructions:string;player_instructions:string};
 type Configuration={version:number;rules:Rules};
 export function PlatformRulesPage({act,busy}:{act:Act;busy:boolean}){

@@ -51,5 +51,11 @@ def validate_advertised_call(specifications,name,arguments):
         raise DomainError('FORBIDDEN_TOOL','此工具未在本轮开放，请使用当前工具目录中的名称',403)
     errors=sorted(Draft202012Validator(specification['parameters']).iter_errors(arguments),key=lambda e:str(list(e.path)))
     if errors:
-        paths=[('.'.join(map(str,e.path)) or '参数')+'：'+e.validator for e in errors[:4]]
+        def hint(error):
+            path='.'.join(map(str,error.path)) or '参数'
+            if error.validator=='type':return path+'：需要'+str(error.validator_value)+'，实际'+type(error.instance).__name__
+            if error.validator=='required':return path+'：缺少必需字段，请按已提供的schema补齐'
+            if error.validator=='additionalProperties':return path+'：包含未定义字段，移除而非改写玩家或GM意图'
+            return path+'：'+error.validator
+        paths=[hint(e) for e in errors[:4]]
         raise DomainError('INVALID_TOOL_INPUT','调用未通过本轮工具协议校验；'+'；'.join(paths))

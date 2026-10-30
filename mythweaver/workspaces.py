@@ -32,7 +32,7 @@ class WorkspaceDelete(WorkspaceInspect):
     confirmation:str=Field(min_length=1,max_length=120)
 
 
-FORBIDDEN={'workspace_list','workspace_inspect','workspace_call','workspace_create','workspace_delete','finish_task','record_progress','platform_rules_read','platform_rules_update'}
+FORBIDDEN={'workspace_list','workspace_inspect','workspace_call','workspace_create','workspace_delete','finish_task','record_progress','ask_admin','platform_rules_read','platform_rules_update'}
 
 
 def validate(harness,arguments):

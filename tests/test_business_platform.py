@@ -141,6 +141,7 @@ def test_requirements_history_and_current_business_acceptance(service,game,marke
     saved=command(service,game,'requirements.put',body)
     initial=quality.read(service,game['id'],'rules')
     assert saved['revision']==1 and not initial['acceptance']['ready']
+    assert 'mapping_issues' in saved and 'unmapped_source_count' in saved
     before=service.snapshot(game['id'])
     report=asyncio.run(quality.run_acceptance(service,Settings(),game['id'],{'key':'rules','revision':1}))
     assert report['acceptance']['ready'] and not report['unmapped_source']
@@ -160,6 +161,7 @@ def test_unmapped_source_and_missing_implementation_cannot_be_accepted(service,g
     command(service,game,'requirements.put',body)
     report=asyncio.run(quality.run_acceptance(service,Settings(),game['id'],{'key':'rules','revision':1}))
     assert not report['acceptance']['ready'] and 'cost' in report['acceptance']['unverified'] and report['unmapped_source']
+    assert any('不存在' in reason for clause in report['coverage'] if clause['key']=='cost' for reason in clause['verification_issues'])
 
 
 def test_business_finish_requires_real_current_acceptance_not_a_model_claim(service,game,market,monkeypatch):

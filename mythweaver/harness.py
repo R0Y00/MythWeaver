@@ -58,12 +58,19 @@ class Progress(Input):
 
 class Empty(Input):pass
 
+
+class AskAdmin(Input):
+    question:str=Field(min_length=1,max_length=2000)
+    reason:str=Field(min_length=1,max_length=2000)
+    completed:list[str]=Field(default_factory=list)
+
 MODELS={'plugin_draft':Draft,'plugin_inspect':Inspect,'plugin_install':Install,'plugin_state':State,
         'plugin_list':Empty,'execute_commands':Commands,'record_progress':Progress,'simulate_actions':Simulation,'finish_task':FinishTask,'platform_rules_read':Empty,'platform_rules_update':UpdateRules}
 MODELS.update(workspace_list=WorkspaceList,workspace_inspect=WorkspaceInspect,workspace_call=WorkspaceCall,workspace_create=WorkspaceCreate,workspace_delete=WorkspaceDelete)
 MODELS['simulate_conversation']=ConversationSimulation
 MODELS['platform_rules_read']=InstructionRead
 MODELS.update(requirements_read=QualityQuery,acceptance_run=AcceptanceRequest,trial_list=Empty,trial_create=TrialCreate,trial_turn=TrialTurn,trial_change=TrialChange)
+MODELS['ask_admin']=AskAdmin
 DESCRIPTIONS={'platform_rules_read':'读取全平台消息触发、指令格式、全局Agent行为说明和版本。与当前游戏规则分开。',
  'platform_rules_update':'申请修改全平台运行规则。changes仅填实际要修改字段，apply_scope=all_games会清除对应游戏覆盖使其统一生效；需审批，不能修改审批策略或密钥。',
  'plugin_draft':'申请保存Python/Node代码插件新版本。manifest包含runtime、requirements、tools与tests；审批后保存，暂不运行代码。',
@@ -87,6 +94,7 @@ DESCRIPTIONS.update(requirements_read='读取持久原文、历史版本条款�
     trial_create='创建持久隔离试玩状态；不复制QQ投递，不覆盖正式数据。默认禁止宿主插件，允许外部副作用须明确allow_external=true。',
     trial_turn='在指定试玩空间继续一次真实玩家模型对话，持久保存随机结果和状态，不重放历史，不修改正式数据或发送QQ。需要最新version和唯一key。',
     trial_change='重置到试玩初始状态或丢弃空间，不影响正式游戏。需最新version。')
+DESCRIPTIONS['ask_admin']='只有缺少会改变玩法的业务规则或外部依赖、确实无法继续时，提出一个具体问题并保存进度等待回复。技术配置遗漏由你补齐，不能用此工具让GM设计schema、权限或测试。不是申请修改的审批工具。'
 
 HARNESS_SYSTEM=MANAGER_GUIDANCE+'''
 【实际工具协议与权限】
@@ -153,6 +161,8 @@ def protocol_issue(message,max_calls=4):
     if not isinstance(calls,list) or (max_calls and len(calls)>max_calls):return 'INVALID_TOOL_BATCH'
     if len(calls)>1 and any(c.get('function',{}).get('name')=='finish_task' for c in calls if isinstance(c,dict)):
         return 'FINISH_MUST_BE_SINGLE_CALL'
+    if len(calls)>1 and any(c.get('function',{}).get('name')=='ask_admin' for c in calls if isinstance(c,dict)):
+        return 'ASK_MUST_BE_SINGLE_CALL'
     if not calls:
         return None if isinstance(message.get('content'),str) and message['content'].strip() else 'EMPTY_MODEL_RESPONSE'
     seen=set()
@@ -217,6 +227,7 @@ class Harness:
         return [*read_tools(),*builtin,*self.service.plugins.tool_specs(game_id)]
 
     async def execute(self,game_id,run_id,name,arguments,execution_id):
+        if name=='ask_admin':return AskAdmin.model_validate(arguments).model_dump()
         if name=='workspace_create':return await asyncio.to_thread(self.service.create_game,arguments['name'].strip(),arguments.get('description',''))
         if name=='workspace_delete':
             from .game_lifecycle import delete_game
@@ -232,6 +243,9 @@ class Harness:
             args=validate(self,arguments)
             value=await self.execute(args.game_id,run_id,args.tool,args.arguments,execution_id)
             return {'game_id':args.game_id,'tool':args.tool,'result':value}
+        if name=='inspect_player_agent':
+            from .player_handoff import inspect
+            return await asyncio.to_thread(inspect,self.service,game_id,arguments,self.settings)
         if name in READ_MODELS:return await asyncio.to_thread(read,self.service,game_id,name,arguments)
         if name.startswith('ext_'):
             return await cancellable(self.service.plugins.invoke_registered,game_id,name,arguments)
@@ -327,7 +341,7 @@ class Harness:
     async def run(self,game_id,run_id):
         if run_id in self.running:raise DomainError('TASK_BUSY','任务正在执行',409)
         self.running[run_id]=asyncio.current_task()
-        started=time.monotonic()
+        started=time.monotonic();stalls=0
         try:
             from .platform_rules import read as read_platform
             with self.store.session() as db:timeout=read_platform(db)['rules']['agent_timeout_seconds']
@@ -338,12 +352,13 @@ class Harness:
                         if not task or task.game_id!=game_id:raise DomainError('NOT_FOUND','执行任务不存在',404)
                         run=db.get(AgentRun,run_id)
                         if run.status!='running':return self.inspect(game_id,run_id)
+                        from .platform_rules import read as read_platform
+                        rules=read_platform(db)['rules']
+                        if not rules['agent_max_steps']:task.max_steps=0
                         continuing=bool(task.pending_calls)
                         if task.max_steps and task.step>=task.max_steps and not continuing:
                             run.status,run.answer='budget_exhausted','本轮执行步数已用完，进度已保存，可继续任务。'
                             break
-                        from .platform_rules import read as read_platform
-                        rules=read_platform(db)['rules']
                         messages=[{'role':'system','content':self.system_prompt(db,game_id,rules)},*task.messages[1:]]
                         remaining=task.max_steps-task.step
                         if task.max_steps and remaining<=3:
@@ -361,9 +376,13 @@ class Harness:
                     max_calls=rules['agent_tool_calls_per_turn']
                     issue=protocol_issue(message,max_calls)
                     if issue:
+                        stalls+=1
+                        if rules['agent_stall_limit'] and stalls>=rules['agent_stall_limit']:
+                            raise DomainError('MODEL_PROTOCOL_STALLED','模型连续返回无法执行的工具协议，已保存进度，请检查模型配置',409)
                         with self.store.session.begin() as db:
                             task=db.get(HarnessTask,run_id);run=db.get(AgentRun,run_id)
-                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。请输出格式完整且arguments为JSON对象字符串的工具调用，每轮数量限制为{max_calls or "不限"}；必要时拆分较大变更。不要重演此前成功的步骤。'}]
+                            recovery='输出被模型服务截断。下一轮只调用一个小工具，不重复整份业务文档或大段测试，省略解释。将大任务拆成分别保存规则、分别准备场景、再验收。' if issue=='MODEL_OUTPUT_TRUNCATED' else '请输出格式完整且arguments为JSON对象字符串的工具调用。'
+                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。{recovery}每轮数量限制为{max_calls or "不限"}；不要重演此前成功的步骤。'}]
                             run.tool_trace=[*run.tool_trace,{'tool':'model.protocol','code':issue,'executed':False}]
                         continue
                     calls=message.get('tool_calls',[])
@@ -373,8 +392,19 @@ class Harness:
                         with self.store.session.begin() as db:
                             task=db.get(HarnessTask,run_id);run=db.get(AgentRun,run_id)
                             task.messages=[*task.messages,assistant_message(message)]
-                            run.answer,run.status=answer[:16000],'answered'
+                            from .task_checks import player_targets
+                            needs_handoff=bool(player_targets(db,run_id))
+                            if needs_handoff:
+                                task.messages=[*task.messages,{'role':'user','content':'执行器检查：玩家配置已有修改，但尚未通过交接验收。继续完成inspect_player_agent和当前版本真实连续对话，用finish_task引用回执。不要把未完成任务交回管理员让他说继续。只有确实缺少无法推断的业务规则或外部依赖时，使用ask_admin提出具体问题；技术漏项自行补齐。'}]
+                                run.answer=answer[:16000]
+                            else:run.answer,run.status=answer[:16000],'answered'
+                        if needs_handoff:
+                            stalls+=1
+                            if rules['agent_stall_limit'] and stalls>=rules['agent_stall_limit']:
+                                raise DomainError('PLAYER_HANDOFF_REQUIRED','模型连续结束答复但未完成玩家配置交接，已保存进度，请核对模型或工作说明',409)
+                            continue
                         break
+                    stalls=0
                     seen=set()
                     for call in calls:
                         try:
@@ -433,7 +463,10 @@ class Harness:
                             if name=='record_progress' and result['ok']:run.answer=json.dumps(value,ensure_ascii=False)
                             if name=='finish_task' and result['ok']:
                                 run.status,run.answer='completed',value['answer']
-                        if name=='finish_task' and result['ok']:break
+                            if name=='ask_admin' and result['ok']:
+                                run.status='awaiting_input'
+                                run.answer=('已完成：'+'；'.join(value['completed'])+'\n\n' if value['completed'] else '')+value['question']+'\n\n需要你决定的原因：'+value['reason']
+                        if name in ('finish_task','ask_admin') and result['ok']:break
         except asyncio.CancelledError:
             self.fail(run_id,'cancelled','TASK_CANCELLED')
         except TimeoutError:

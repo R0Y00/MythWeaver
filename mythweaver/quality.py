@@ -64,7 +64,9 @@ def config_stamp(db,game):
     routing=db.get(PlatformConfig,'model_routing')
     value=[game.version,policy_for(db,game.id),read(db),
         [(p.id,p.digest,p.enabled,p.status) for p in db.scalars(select(PluginRelease).where(PluginRelease.game_id==game.id).order_by(PluginRelease.id))],
-        [(p.actor,p.version,p.blocked) for p in db.scalars(select(Participant).where(Participant.game_id==game.id).order_by(Participant.actor))],
+        # First participation registers an unblocked actor during simulations.
+        # That is runtime bookkeeping, not an authorization change.
+        [(p.actor,p.blocked) for p in db.scalars(select(Participant).where(Participant.game_id==game.id,Participant.blocked==True).order_by(Participant.actor))],
         list(db.scalars(select(Channel.group_id).where(Channel.game_id==game.id).order_by(Channel.group_id))),
         [(p.id,p.version,p.enabled) for p in db.scalars(select(ModelProvider).order_by(ModelProvider.id))],
         [routing.version,routing.value] if routing else None]
@@ -88,7 +90,11 @@ def put(service,db,game,payload):
         if clause.status in ('deferred','out_of_scope') and not clause.note.strip():raise DomainError('INVALID_COVERAGE','暂缓或排除条款须保存原因')
     row=GameDocument(game_id=game.id,key=args.key,revision=args.revision+1,content=args.model_dump(exclude={'key','revision'}))
     db.add(row);db.flush();service.event(db,game.id,'admin','requirements.updated',{'id':row.id,'key':row.key,'revision':row.revision})
-    return {'id':row.id,'key':row.key,'revision':row.revision,'source_chars':len(args.source),'clause_count':len(args.clauses),'scenario_count':len(args.scenarios)}
+    coverage=report(db,game,row)
+    return {'id':row.id,'key':row.key,'revision':row.revision,'source_chars':len(args.source),'clause_count':len(args.clauses),'scenario_count':len(args.scenarios),
+        'unmapped_source_preview':[text[:400] for text in coverage['unmapped_source'][:10]],'unmapped_source_count':len(coverage['unmapped_source']),
+        'mapping_issues':[{'clause':c['key'],'issues':[reason for reason in c['verification_issues'] if '验收报告' not in reason]} for c in coverage['coverage'] if any('验收报告' not in reason for reason in c['verification_issues'])][:10],
+        'notice':'policy实现引用须使用真实设置字段，例如player_instructions、player_agent_enabled，不能填policy。每个范围内条款都要关联场景；声明式实现也需要测试，不能留空。'}
 
 
 def tool_read(service,game_id,arguments):
@@ -126,9 +132,19 @@ def report(db,game,document):
     clauses=[]
     for raw in document.content['clauses']:
         item=deepcopy(raw)
-        linked=bool(item['implementations']) and all(reference_exists(db,game,r) for r in item['implementations'])
+        missing=[r for r in item['implementations'] if not reference_exists(db,game,r)]
+        linked=bool(item['implementations']) and not missing
         verified=item['status'] in ('implemented','manual') and linked and bool(item['scenarios']) and all(cases.get(k,{}).get('passed') is True for k in item['scenarios'])
-        item.update(linked=linked,verified=verified)
+        reasons=[]
+        if item['status'] not in ('implemented','manual','out_of_scope'):reasons.append('条款仍标记为'+item['status']+'；实现后须修订状态，不能只添加测试引用')
+        if not item['implementations']:reasons.append('尚未关联实际实现')
+        if missing:reasons.append('实现引用不存在或不可用：'+','.join(r['section']+'.'+r['key'] for r in missing))
+        if not item['scenarios']:reasons.append('没有关联验收场景')
+        elif not current:reasons.append('缺少当前配置与文档版本的验收报告')
+        else:
+            failed=[k for k in item['scenarios'] if cases.get(k,{}).get('passed') is not True]
+            if failed:reasons.append('未通过的关联场景：'+','.join(failed))
+        item.update(linked=linked,verified=verified,verification_issues=[] if item['status']=='out_of_scope' else reasons)
         clauses.append(item)
     included=[c for c in clauses if c['status']!='out_of_scope']
     untested=[c['key'] for c in included if not c['verified']]
@@ -140,7 +156,8 @@ def report(db,game,document):
             if index<0:break
             covered[index:index+len(clause['text'])]=[True]*len(clause['text']);offset=index+len(clause['text'])
     unmapped=''.join(c if not covered[i] else '\n' for i,c in enumerate(source))
-    gaps=[part.strip() for part in unmapped.splitlines() if part.strip()]
+    # Separators left between verbatim clauses are not omitted requirements.
+    gaps=[part.strip() for part in unmapped.splitlines() if any(c.isalnum() for c in part)]
     versions=[{'id':r.id,'revision':r.revision,'created_at':r.created_at.isoformat()} for r in db.scalars(select(GameDocument).where(GameDocument.game_id==game.id,GameDocument.key==document.key).order_by(GameDocument.revision.desc()))]
     return {**packed(document),'coverage':clauses,'revisions':versions,'unmapped_source':gaps,'acceptance':{'current':current,'run_id':evidence.id if evidence else None,
         'ready':bool(included) and not untested and not gaps,'unverified':untested,'scenarios':cases},

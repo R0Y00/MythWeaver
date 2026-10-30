@@ -420,6 +420,14 @@ class Store:
                 # Additive tables are created above: documents, player choices,
                 # persistent isolated trials and acceptance evidence.
                 db.add(SchemaMigration(version=12))
+            if not db.get(SchemaMigration,13):
+                config=db.get(PlatformConfig,'runtime_rules')
+                if config:
+                    value=dict(config.value)
+                    if value.get('agent_max_steps')==24:value['agent_max_steps']=0
+                    if value.get('agent_timeout_seconds')==900:value['agent_timeout_seconds']=0
+                    if value!=config.value:config.value=value;config.version+=1
+                db.add(SchemaMigration(version=13))
         # A crashed sender cannot know whether QQ accepted an in-flight message.
         with self.session.begin() as db:
             from sqlalchemy import update

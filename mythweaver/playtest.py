@@ -76,6 +76,12 @@ class RecordCheck(Input):
     expected:Any
 
 
+class IntentCheck(Input):
+    action_index:int=Field(default=0,ge=0)
+    path:str=Field(pattern=r'^/[^\s]+$')
+    expected:Any
+
+
 class ChatStep(Input):
     message:str=Field(min_length=1,max_length=2000)
     expect_interaction:str|None=Field(default=None,max_length=80)
@@ -83,6 +89,8 @@ class ChatStep(Input):
     expect_action:Literal['none','applied','pending','confirmation_required','cancelled','expired','stale']|None=None
     expect_state_changed:bool|None=None
     expect_records:list[RecordCheck]=Field(default_factory=list)
+    expect_inputs:list[IntentCheck]=Field(default_factory=list)
+    expect_history_used:bool|None=None
     expect_reply_not_contains:list[str]=Field(default_factory=list)
     expect_reply_max_chars:int|None=Field(default=None,ge=1)
     expect_error_code:str|None=Field(default=None,min_length=1,max_length=80)
@@ -117,7 +125,10 @@ async def simulate_conversation(service,settings,game_id,arguments):
     from .plugins import Plugins
     args=ConversationSimulation.model_validate(arguments)
     from .platform_rules import read as read_platform
-    with service.store.session() as db:limit=read_platform(db)['rules']['simulation_chat_limit']
+    from .quality import config_stamp
+    with service.store.session() as db:
+        limit=read_platform(db)['rules']['simulation_chat_limit']
+        configuration_stamp=config_stamp(db,service.game(db,game_id))
     if limit and len(args.messages)>limit:raise DomainError('SIMULATION_LIMIT',f'聊天试玩超过当前{limit}轮预算，可由管理员修改simulation_chat_limit')
     with service.store.engine.connect() as connection:
         outer=connection.begin()
@@ -138,6 +149,18 @@ async def simulate_conversation(service,settings,game_id,arguments):
                     action=result.get('action')
                     reply=private_reply(result)
                     checks={}
+                    used=any(e.get('turn_id') for a in result.get('intent',{}).get('actions',[]) for e in a.get('evidence',[]))
+                    if step.expect_history_used is not None:
+                        checks['history_used']=bool(used)==step.expect_history_used
+                    for check_index,check in enumerate(step.expect_inputs):
+                        try:
+                            value=result['intent']['actions'][check.action_index]['data']
+                            for part in check.path[1:].split('/'):
+                                part=part.replace('~1','/').replace('~0','~')
+                                value=value[int(part)] if isinstance(value,list) else value[part]
+                            matches=json.dumps(value,sort_keys=True,ensure_ascii=False)==json.dumps(check.expected,sort_keys=True,ensure_ascii=False)
+                        except (KeyError,TypeError,IndexError,ValueError):matches=False
+                        checks['input_'+str(check_index+1)]=matches
                     if step.expect_interaction is not None:checks['interaction']=bool(action) and action['interaction']==step.expect_interaction
                     if step.expect_reply_contains is not None:checks['reply_contains']=step.expect_reply_contains in reply
                     if step.expect_action is not None:checks['action']=not action if step.expect_action=='none' else bool(action) and action['status']==step.expect_action
@@ -149,10 +172,12 @@ async def simulate_conversation(service,settings,game_id,arguments):
                     if step.expect_reply_max_chars is not None:checks['reply_length']=len(reply)<=step.expect_reply_max_chars
                     if step.expect_error_code is not None:checks['error_code']=False
                     steps.append({'index':index+1,'message':step.message,'ok':all(checks.values()),'checks':checks,
-                                  'answer':reply,'action':action,'state_changed':changed,'visible_records':result['records']})
+                                  'answer':reply,'action':action,'state_changed':changed,'visible_records':result['records'],'history_used':bool(used)})
                 except DomainError as exc:
                     # A rejected business action can itself be the expected outcome.
                     checks={'error_code':exc.code==step.expect_error_code} if step.expect_error_code is not None else {}
+                    if step.expect_history_used is not None:checks['history_used']=False
+                    for check_index,_ in enumerate(step.expect_inputs):checks['input_'+str(check_index+1)]=False
                     with scoped.session() as db:
                         changed=before!=fingerprint(db,trial.game(db,game_id))
                         if step.expect_state_changed is not None:checks['state_changed']=changed==step.expect_state_changed
@@ -165,7 +190,8 @@ async def simulate_conversation(service,settings,game_id,arguments):
                     steps.append({'index':index+1,'message':step.message,'ok':step.expect_error_code is not None and all(checks.values()),
                                   'checks':checks,'code':exc.code,'message_detail':exc.message,'state_changed':changed})
             asserted=all(bool(step.get('checks')) for step in steps)
-            return {'test_layer':'player_model_conversation','actor':args.actor,'audience':args.audience,
-                    'steps':steps,'passed':asserted and all(step['ok'] for step in steps),'asserted':asserted,'rolled_back':True,
+            with scoped.session() as db:configuration_current=config_stamp(db,trial.game(db,game_id))==configuration_stamp
+            return {'test_layer':'player_model_conversation','game_id':game_id,'configuration_stamp':configuration_stamp,'configuration_current':configuration_current,'actor':args.actor,'audience':args.audience,
+                    'steps':steps,'passed':configuration_current and asserted and all(step['ok'] for step in steps),'asserted':asserted,'rolled_back':True,
                     'notice':'实际调用玩家模型、受众权限、聊天历史和交互结算；数据库最终回滚，无QQ发送器。不验证NapCat传输。插件文件/网络外部副作用不能回滚；工具使用期间会锁定该游戏。'}
         finally:outer.rollback()

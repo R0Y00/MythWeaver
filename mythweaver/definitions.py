@@ -54,7 +54,12 @@ def validate_definition(value):
                     from .player import validate_access
                     validate_access(spec)
             if section == "interactions":
-                allowed |= {"mode", "response", "allow_users", "effects", "condition", "workflow", "player_enabled", "player_description", "group_enabled", "extension", "confirmation", "gm_delivery"}
+                allowed |= {"mode", "response", "allow_users", "effects", "condition", "workflow", "player_enabled", "player_description", "group_enabled", "extension", "confirmation", "gm_delivery", "player_contract", "player_batch"}
+                if 'player_contract' in spec:
+                    from .player_intent import validate
+                    validate(spec,value)
+                if not isinstance(spec.get('player_batch',False),bool) or (spec.get('player_batch') and (spec.get('confirmation') or spec.get('mode','manual') not in ('rule','fixed','record'))):
+                    raise DomainError('INVALID_DEFINITION','多行动提交须使用无需确认的rule/fixed/record交互；共享确认用一个含列表输入的交互')
                 if 'confirmation' in spec:
                     from .choices import validate
                     validate(spec['confirmation'])

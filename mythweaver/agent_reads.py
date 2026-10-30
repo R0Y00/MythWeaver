@@ -53,11 +53,14 @@ class ModuleValidation(Input):
 MODELS={'query_records':RecordQuery,'query_events':EventQuery,'inspect_flow':FlowQuery}
 MODELS.update(inspect_capabilities=CapabilitiesQuery,list_controls=ControlQuery,inspect_runtime=RuntimeQuery)
 MODELS['validate_module']=ModuleValidation
+from .player_handoff import HandoffQuery
+MODELS['inspect_player_agent']=HandoffQuery
 DESCRIPTIONS={'query_records':'查询当前游戏记录，可按类型、完整ID或游标读取，管理员上下文。','query_events':'查询当前游戏审计历史，返回最近事件，可按类型和游标筛选。','inspect_flow':'读取当前游戏某个流程实例的状态、上下文和历史。'}
 DESCRIPTIONS.update(inspect_capabilities='查询全部已实现游戏命令，传入 kinds 获取至多8个命令的完整参数schema。',
                     list_controls='查询游戏设置/版本、参与者、群绑定、检查点、退役记录、参与事项、玩家对话(player_turns)或模板；可指定ID或分页。',
                     inspect_runtime='读取动态模块/函数语言的真实语法及限制，可按标识读取当前游戏至多8个模块及函数完整源码。')
 DESCRIPTIONS['validate_module']='在当前定义上检验新增/替换模块的完整manifest，返回合法性与版本；不写入、不安装、不执行代码。module.put前先调用。'
+DESCRIPTIONS['inspect_player_agent']='核对玩家助手实际生效的职责说明、行动/参数契约、群私聊开放、插件缺口、待确认数量及最近真实对话。可指定actor和audience检查实际可见资料；actions分页。由管理助手补齐技术漏项，不要求GM考虑所有实现细节。'
 
 
 def tools():
@@ -76,6 +79,9 @@ def read(service,game_id,name,arguments):
         query=MODELS[name].model_validate(arguments)
     except ValidationError:
         raise DomainError('INVALID_TOOL_INPUT','读取参数未通过校验') from None
+    if name=='inspect_player_agent':
+        from .player_handoff import inspect
+        return inspect(service,game_id,query.model_dump())
     with service.store.session() as db:
         game=service.game(db,game_id)
         if name=='validate_module':

@@ -21,9 +21,10 @@ def check_effects(definition,spec):
     effects=spec.get("effects",[])
     if not isinstance(effects,list) or len(effects)>10:
         raise DomainError("INVALID_RULE","每次交互最多 10 个数据变更")
-    for effect in effects:
+    for index,effect in enumerate(effects):
         if not isinstance(effect,dict) or set(effect)-{"type_key","id_from","field","operation","value","value_from","expression","plugin_key","tool"}:
-            raise DomainError("INVALID_RULE","数据变更包含未知字段")
+            unknown=','.join(sorted(str(k) for k in set(effect)-{"type_key","id_from","field","operation","value","value_from","expression","plugin_key","tool"})) if isinstance(effect,dict) else '非对象'
+            raise DomainError("INVALID_RULE",f"effects[{index}]包含不支持字段：{unknown}。条件放交互condition；按输入分支计算用compute.expression，不能给单项effect添加condition。")
         if effect.get("operation") not in ("set","increment","append","compute","plugin"):
             raise DomainError("INVALID_RULE","变更操作支持 set、increment、append、compute、plugin")
         if any(not isinstance(effect.get(k),str) or not effect[k] for k in ("type_key","id_from","field")):

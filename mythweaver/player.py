@@ -47,6 +47,7 @@ def authorize_target(db,game,entity,actor):
 
 
 def view(service,db,game,actor,compact=False):
+    from .player_intent import public_contract
     check_participant(db,game.id,actor)
     policy,version=policy_for(db,game.id)
     if not policy['player_agent_enabled']:
@@ -58,7 +59,8 @@ def view(service,db,game,actor,compact=False):
             records.append({'id':row.id,'type_key':row.type_key,'version':row.version,
                             'data':{k:v for k,v in row.data.items() if k in access['read_fields']}})
     interactions={k:{'label':s.get('label',k),'description':s.get('player_description',''),
-                     'schema':s.get('schema',{'type':'object'}),**({'confirmation':s['confirmation']} if s.get('confirmation') else {})}
+                     'schema':s.get('schema',{'type':'object'}),**({'confirmation':s['confirmation']} if s.get('confirmation') else {}),
+                     **({'player_contract':public_contract(s)} if 'player_contract' in s else {}),**({'player_batch':True} if s.get('player_batch') else {})}
                   for k,s in game.definition.get('interactions',{}).items()
                   if s.get('enabled',True) and s.get('player_enabled',False) and (AUDIENCE.get()!='group' or s.get('group_enabled',False)) and
                   (not s.get('allow_users') or actor in s['allow_users'])}
@@ -113,7 +115,7 @@ def conversation_history(context,history):
     """Private replies are replayable only while their entire state stamp still matches."""
     result=[]
     for row in reversed(history):
-        entry={'request':row.prompt}
+        entry={'request':row.prompt,**({'turn_id':row.id} if getattr(row,'id',None) else {})}
         receipt=row.result or {}
         current_epoch=receipt.get('context_epoch')==context.get('context_epoch')
         private_current=bool(context.get('state_stamp')) and receipt.get('state_stamp')==context['state_stamp']
@@ -123,6 +125,33 @@ def conversation_history(context,history):
             if action:entry['actual_receipt']={k:action[k] for k in ('interaction','status','flow_status','result') if k in action}
         result.append(entry)
     return result
+
+
+def recent_history(db,game_id,actor):
+    return [r for r in db.scalars(select(PlayerTurn).where(PlayerTurn.game_id==game_id,PlayerTurn.actor==actor,PlayerTurn.status=='answered')
+            .order_by(PlayerTurn.created_at.desc()).limit(30)) if r.result.get('audience','private')==AUDIENCE.get() and r.result.get('conversation_id','')==CONVERSATION.get()][:6]
+
+
+def validate_payloads(db,game,actor,message,prompt,history):
+    from .definitions import schema_validate
+    from .player_intent import verify
+    actions=decode_actions(message)
+    batch=bool(message.get('tool_calls') and message['tool_calls'][0].get('function',{}).get('name')=='submit_actions')
+    from .platform_rules import read
+    limit=read(db)['rules']['player_action_limit']
+    if limit and len(actions)>limit:raise DomainError('INVALID_ACTION','本次行动超过平台多行动预算，请拆分或由管理员修改预算')
+    for payload,evidence in actions:
+        validate_action(db,game,actor,payload)
+        spec=game.definition.get('interactions',{}).get(payload['interaction'],{})
+        if batch and (not spec.get('player_batch') or spec.get('confirmation') or spec.get('mode','manual') not in ('rule','fixed','record')):
+            raise DomainError('INVALID_ACTION','这些行动没有全部开放原子多行动提交，尚未执行；需确认的组合请用管理员定义的列表交互')
+        if payload['interaction']=='_review':
+            from .service import FREE_TEXT_SCHEMA
+            schema_validate(FREE_TEXT_SCHEMA,payload['data'])
+        else:
+            schema_validate(spec.get('schema',{'type':'object'}),payload['data'])
+            verify(db,game,actor,payload,evidence,prompt,history)
+    return actions
 
 
 def change_summary(before,after,definition):
@@ -158,6 +187,7 @@ def decode_action(message):
     try:
         payload=json.loads(calls[0]['function']['arguments'])
         if not isinstance(payload,dict):raise ValueError()
+        payload.pop('evidence',None)
         if calls[0]['function']['name']=='request_gm':
             if set(payload)!={'question'} or not isinstance(payload['question'],str) or not 1<=len(payload['question'].strip())<=1500:raise ValueError()
             payload={'interaction':'_review','data':{'text':payload['question'].strip()}}
@@ -165,6 +195,22 @@ def decode_action(message):
         raise DomainError('INVALID_ACTION','行动参数无效') from None
     from .command_catalog import validate_command
     return validate_command('submit',payload)
+
+
+def decode_actions(message):
+    calls=message.get('tool_calls',[]) if isinstance(message,dict) else []
+    if len(calls)==1 and calls[0].get('function',{}).get('name')=='submit_actions':
+        try:
+            body=json.loads(calls[0]['function']['arguments'])
+            if set(body)!={'actions'} or not isinstance(body['actions'],list) or not body['actions']:raise ValueError()
+            messages=[{'tool_calls':[{'function':{'name':'submit_action','arguments':json.dumps(a,ensure_ascii=False)}}]} for a in body['actions']]
+            return [(decode_action(m),json.loads(m['tool_calls'][0]['function']['arguments']).get('evidence',[])) for m in messages]
+        except (ValueError,TypeError,KeyError):raise DomainError('INVALID_ACTION','多行动提交格式无效') from None
+    payload=decode_action(message)
+    if not payload:return []
+    try:evidence=json.loads(calls[0]['function']['arguments']).get('evidence',[])
+    except (ValueError,TypeError,KeyError):evidence=[]
+    return [(payload,evidence)]
 
 
 class PlayerAgent:
@@ -215,7 +261,7 @@ class PlayerAgent:
                 context['pending_confirmation']={'quote':pending.quote,'expires_at':pending.expires_at.isoformat(),
                     'confirm_words':config.confirm_words,'cancel_words':config.cancel_words}
                 direct_choice=prompt.strip() in config.confirm_words+config.cancel_words
-            history=[r for r in db.scalars(select(PlayerTurn).where(PlayerTurn.game_id==game_id,PlayerTurn.actor==actor,PlayerTurn.status=='answered').order_by(PlayerTurn.created_at.desc()).limit(30)) if r.result.get('audience','private')==AUDIENCE.get() and r.result.get('conversation_id','')==CONVERSATION.get()][:6]
+            history=recent_history(db,game_id,actor)
             row=PlayerTurn(game_id=game_id,actor=actor,prompt=prompt,key=key)
             db.add(row)
             db.flush()
@@ -229,36 +275,34 @@ class PlayerAgent:
                         message={'_choice_response':True} if direct_choice else await self.request(context,history,prompt)
                         try:
                             # Validate before running ANY plugin or committing ANY action.
-                            self.preflight(game_id,actor,initial,message)
+                            self.preflight(game_id,actor,initial,message,prompt,history)
                             break
                         except DomainError as exc:
-                            if exc.code not in ('INVALID_ACTION','INVALID_PLAN','VALIDATION_FAILED') or attempt==2:raise
+                            if exc.code not in ('INVALID_ACTION','INVALID_PLAN','VALIDATION_FAILED','INTENT_MISMATCH') or attempt==2:raise
                             context={**context,'validation_feedback':{'code':exc.code,'message':exc.message,
-                                     'executed':False,'instruction':'修正输入格式，严格遵循本次交互schema；不得改变玩家意图。'}}
+                                     'rejected_actions':[{'interaction':p['interaction'],'data':p['data'],'evidence':e} for p,e in decode_actions(message)] if exc.code=='INTENT_MISMATCH' else [],
+                                     'executed':False,'instruction':'核对当前原话、同聊天上下文和交互契约，修正同一意图。依据片段选择错误时修正片段，不把明确请求变成反复确认。缺信息时正常询问，不猜目标和数量，不改变意图来绕过错误。'}}
             except TimeoutError:
                 raise DomainError('TASK_TIMEOUT','玩家助手处理超时，没有执行行动',504) from None
             from .plugins import cancellable
             return await cancellable(self.finish,game_id,actor,turn_id,initial,message)
-        except BaseException:
+        except BaseException as exc:
             with self.store.session.begin() as db:
                 row=db.get(PlayerTurn,turn_id)
                 if row.status=='running':
                     row.status='failed'
+                    row.result={'audience':AUDIENCE.get(),'conversation_id':CONVERSATION.get(),
+                        'error_code':exc.code if isinstance(exc,DomainError) else 'PLAYER_FAILED',
+                        'error_message':exc.message if isinstance(exc,DomainError) else '本次处理未完成，请检查平台日志。'}
             raise
 
-    def preflight(self,game_id,actor,initial,message):
+    def preflight(self,game_id,actor,initial,message,prompt='',history=()):
         from .agent import fingerprint
         from .definitions import schema_validate
         with self.store.session() as db:
             game=self.service.game(db,game_id)
             if fingerprint(db,game)!=initial:raise DomainError('STATE_STALE','游戏状态或授权已变化，请重新发起行动',409)
-            payload=decode_action(message)
-            if payload:
-                validate_action(db,game,actor,payload)
-                if payload['interaction']=='_review':
-                    from .service import FREE_TEXT_SCHEMA
-                    schema_validate(FREE_TEXT_SCHEMA,payload['data'])
-                else:schema_validate(game.definition['interactions'][payload['interaction']].get('schema',{'type':'object'}),payload['data'])
+            validate_payloads(db,game,actor,message,prompt,history)
 
     def finish(self,game_id,actor,turn_id,initial,message,stop=None):
         from .agent import fingerprint
@@ -268,13 +312,20 @@ class PlayerAgent:
             if row.status!='running' or fingerprint(db,game)!=initial:
                 raise DomainError('STATE_STALE','游戏状态或授权已变化，请重新发起行动',409)
             before=view(self.service,db,game,actor)
-            payload=decode_action(message)
+            actions=validate_payloads(db,game,actor,message,row.prompt,recent_history(db,game_id,actor))
+            payload=actions[0][0] if len(actions)==1 else None
             action=None
             if message.get('_choice_response'):
                 from .choices import respond
                 action=respond(self.service,db,game,actor,row.prompt,AUDIENCE.get(),CONVERSATION.get(),'player:'+turn_id)
                 if not action:raise DomainError('STATE_STALE','待确认内容已经变化，请重新提出行动',409)
                 answer=action.get('result') or '行动已完成。'
+            elif len(actions)>1:
+                receipts=[]
+                for index,(item,_) in enumerate(actions):
+                    receipts.append(self.service.execute(db,game_id,actor,'player:'+turn_id+':'+str(index),'submit',item))
+                answer='\n'.join(str(i+1)+'. '+game.definition['interactions'][item['interaction']].get('label',item['interaction'])+'：'+(receipt.get('result') or '已按规则处理。') for i,((item,_),receipt) in enumerate(zip(actions,receipts)))
+                action={'id':turn_id,'interaction':'_batch','status':'applied','result':answer,'actions':receipts}
             elif payload:
                 validate_action(db,game,actor,payload)
                 if payload['interaction']=='_review':
@@ -296,7 +347,7 @@ class PlayerAgent:
             from .platform_rules import read as platform_read
             result={'id':turn_id,'answer':answer,'action':action,'records':current['records'],'state_stamp':fingerprint(db,game),'audience':AUDIENCE.get(),
                     'conversation_id':CONVERSATION.get(),'context_epoch':[game.version,policy_for(db,game_id)[1],platform_read(db)['version']],
-                    'reads':message.get('_read_trace',[])}
+                    'reads':message.get('_read_trace',[]),'intent':{'actions':[{'interaction':p['interaction'],'data':p['data'],'evidence':e} for p,e in actions]}}
             row.status,row.answer,row.result='answered',answer[:16000],result
             self.service.event(db,game_id,actor,'player.turn',{'id':turn_id,'executed':action is not None})
             if stop is not None and stop.is_set():
@@ -305,8 +356,9 @@ class PlayerAgent:
 
     async def request(self,context,history,prompt):
         selected=self.models.resolve('player')
+        from .player_intent import Evidence,tools as action_tools,normalize
         tools=[{'type':'function','function':{'name':'submit_action','description':'按管理员定义提交一个游戏行动',
-            'parameters':{'type':'object','properties':{'interaction':{'type':'string','enum':list(context['interactions'])},'data':{'type':'object'}},'required':['interaction','data'],'additionalProperties':False,
+            'parameters':{'type':'object','properties':{'interaction':{'type':'string','enum':list(context['interactions'])},'data':{'type':'object'},'evidence':{'type':'array','items':Evidence.model_json_schema()}},'required':['interaction','data'],'additionalProperties':False,
                           'oneOf':[{'properties':{'interaction':{'enum':[key]},'data':spec['schema']}} for key,spec in context['interactions'].items()]}}}] if context['interactions'] else []
         tools.append({'type':'function','function':{'name':'request_gm',
             'description':'规则冲突、特殊结果或需要真人裁决时提交GM待办。不会修改游戏资源；缺少普通参数先询问玩家。',
@@ -319,6 +371,12 @@ class PlayerAgent:
         messages.append({'role':'user','content':prompt})
         from .player_reads import PlayerRead,read_records
         tools.append({'type':'function','function':{'name':'read_player_records','description':'按需读取自己有权限查看的资料。支持类型、记录ID、字段、游标与字段内容分页。查询不执行行动，不得靠未展示资料推断不存在。','parameters':PlayerRead.model_json_schema()}})
+        tools.extend(action_tools(context['interactions']))
+        batch_keys=[key for key,spec in context['interactions'].items() if spec.get('player_batch')]
+        if batch_keys:
+            tools.append({'type':'function','function':{'name':'submit_actions','description':'将玩家同一句明确要求的多个独立行动原子提交：全部成功或全部回滚。只能使用允许多行动的交互。不是为了凑步骤自动执行其他行动；需要统一确认的组合使用已有列表交互。',
+                'parameters':{'type':'object','properties':{'actions':{'type':'array','minItems':1,'items':{'type':'object','properties':{
+                    'interaction':{'type':'string','enum':batch_keys},'data':{'type':'object'},'evidence':{'type':'array','items':Evidence.model_json_schema()}},'required':['interaction','data'],'additionalProperties':False}}},'required':['actions'],'additionalProperties':False}}})
         reads=[]
         from .platform_rules import read as platform_read
         with self.store.session() as db:read_limit=platform_read(db)['rules']['player_read_steps']
@@ -336,16 +394,17 @@ class PlayerAgent:
                         result=json.loads(raw)['choices'][0]['message']
                         if not isinstance(result,dict):raise ValueError()
                     calls=result.get('tool_calls',[])
-                    if len(calls)!=1 or calls[0].get('function',{}).get('name')!='read_player_records':
+                    if not calls or not all(call.get('function',{}).get('name')=='read_player_records' for call in calls):
+                        result=normalize(result,context['interactions'])
                         result['_read_trace']=reads
                         return result
-                    call=calls[0]
-                    try:value=read_records(self.service,context,json.loads(call['function']['arguments']))
-                    except (ValueError,KeyError,TypeError):value={'error':'读取参数格式错误，请按工具schema重试'}
-                    except DomainError as exc:value={'error':exc.message,'code':exc.code}
-                    reads.append({'tool':'read_player_records','records':len(value.get('records',[])),'ok':'error' not in value})
                     messages.append({'role':'assistant','content':None,'tool_calls':calls})
-                    messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(value,ensure_ascii=False)})
+                    for call in calls:
+                        try:value=read_records(self.service,context,json.loads(call['function']['arguments']))
+                        except (ValueError,KeyError,TypeError):value={'error':'读取参数格式错误，请按工具schema重试'}
+                        except DomainError as exc:value={'error':exc.message,'code':exc.code}
+                        reads.append({'tool':'read_player_records','records':len(value.get('records',[])),'ok':'error' not in value})
+                        messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(value,ensure_ascii=False)})
                 raise DomainError('PLAYER_READ_LIMIT','本次查询读取较多，请缩小查询范围后继续',409)
         except (httpx.HTTPError,ValueError,TypeError,KeyError,IndexError):
             raise DomainError('MODEL_UNAVAILABLE','玩家助手请求失败，没有执行行动',502) from None

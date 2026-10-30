@@ -12,6 +12,8 @@ from .schemas import Input
 READ_ONLY={'query_records','query_events','inspect_flow','inspect_runtime','inspect_capabilities','list_controls','validate_module',
            'plugin_list','plugin_inspect','record_progress','finish_task','platform_rules_read','workspace_list','workspace_inspect'}
 READ_ONLY.update({'requirements_read','trial_list'})
+READ_ONLY.add('inspect_player_agent')
+READ_ONLY.add('ask_admin')
 
 class ApprovalDecision(Input):
     decision:Literal['approve','reject']

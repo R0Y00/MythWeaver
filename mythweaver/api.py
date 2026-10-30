@@ -6,7 +6,7 @@ import secrets
 import time
 from typing import Literal
 
-from fastapi import FastAPI, Header, Request, Response, WebSocket
+from fastapi import FastAPI, Header, Request, Response, WebSocket,Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
@@ -89,7 +89,7 @@ def create_app(settings=None, store=None):
             await bot.socket.close(code=1001)
         store.engine.dispose()
 
-    app = FastAPI(title="MythWeaver", version="0.10.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="MythWeaver", version="0.11.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service, app.state.bot, app.state.store = service, bot, store
     from .quality_api import router as quality_router
     app.include_router(quality_router(service,settings))
@@ -183,6 +183,19 @@ def create_app(settings=None, store=None):
             service.game(db,game_id)
             return [packed(r) for r in db.scalars(select(PlayerTurn).where(PlayerTurn.game_id==game_id).order_by(PlayerTurn.created_at.desc()).limit(50))]
 
+    @app.get('/api/games/{game_id}/player/handoff')
+    def player_handoff(game_id:str,actor:str|None=Query(default=None,pattern=r'^qq:[0-9]{1,25}$'),audience:Literal['private','group']='private',after:str|None=None,instruction_offset:int=Query(default=0,ge=0)):
+        from .player_handoff import inspect
+        return inspect(service,game_id,{'actor':actor,'audience':audience,'after':after,'instruction_offset':instruction_offset},settings)
+
+    @app.get('/api/games/{game_id}/player/turns/{turn_id}')
+    def player_turn_detail(game_id:str,turn_id:str):
+        from .db import PlayerTurn
+        with store.session() as db:
+            service.game(db,game_id);row=db.get(PlayerTurn,turn_id)
+            if not row or row.game_id!=game_id:raise DomainError('NOT_FOUND','玩家对话不存在',404)
+            return packed(row)
+
     def signature(value):
         return hmac.new(settings.session_secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
@@ -257,7 +270,7 @@ def create_app(settings=None, store=None):
     @app.get("/api/status")
     def status():
         selected=models.available()
-        return {"onebot": bot.status(), "version":"0.10.0", "agent": {"configured":bool(selected),
+        return {"onebot": bot.status(), "version":"0.11.0", "agent": {"configured":bool(selected),
                 "model":selected,"message":"管理助手已配置" if selected else "请在模型管理中分配管理规划模型"}}
 
     @app.get("/api/games")

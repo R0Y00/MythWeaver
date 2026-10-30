@@ -15,10 +15,12 @@ class Rules(Input):
     group_input:Literal['commands','agent']='commands'
     agent_instructions:str=''
     player_instructions:str=''
-    agent_max_steps:int=Field(default=24,ge=0,le=2147483647,description='新任务及继续任务的模型请求轮数；0不限')
-    agent_timeout_seconds:int=Field(default=900,ge=0,description='本次任务运行超时秒数；0不限')
+    agent_max_steps:int=Field(default=0,ge=0,le=2147483647,description='任务模型请求轮数；默认0不限，管理员可主动设置预算')
+    agent_timeout_seconds:int=Field(default=0,ge=0,description='任务总超时秒数；默认0不限，服务商请求和插件超时独立')
     player_timeout_seconds:int=Field(default=90,ge=0,description='玩家模型决策总超时秒数；0不限。服务商单次请求超时独立')
     player_read_steps:int=Field(default=6,ge=0,description='玩家单次决策的模型读取轮数；0不限，总超时独立')
+    player_action_limit:int=Field(default=8,ge=0,description='玩家单条消息的原子行动数；0不限，仍须每个交互允许多行动')
+    agent_stall_limit:int=Field(default=3,ge=0,description='连续无有效协议或跳过必要交接的响应容忍数；0不限，与任务总轮数不同')
     agent_tool_calls_per_turn:int=Field(default=4,ge=0,description='单轮模型工具调用数；0不限')
     player_data_context_chars:int=Field(default=40000,ge=0,description='玩家可见资料字符预算，不含说明；0不限')
     simulation_action_limit:int=Field(default=20,ge=0,description='一次结构化试玩行动数；0不限')
@@ -36,6 +38,8 @@ class RulesPatch(Input):
     agent_timeout_seconds:int|None=Field(default=None,ge=0)
     player_timeout_seconds:int|None=Field(default=None,ge=0)
     player_read_steps:int|None=Field(default=None,ge=0)
+    player_action_limit:int|None=Field(default=None,ge=0)
+    agent_stall_limit:int|None=Field(default=None,ge=0)
     agent_tool_calls_per_turn:int|None=Field(default=None,ge=0)
     player_data_context_chars:int|None=Field(default=None,ge=0)
     simulation_action_limit:int|None=Field(default=None,ge=0)
