@@ -38,6 +38,23 @@ export function AgentPage({snap,act,busy,status,navigate}:GamePageProps&{status:
   useEffect(()=>{if(session)setApprovalMode(session.approval_mode);},[session?.id,session?.approval_mode]);
   useEffect(()=>{if(stick.current)scroll.current?.scrollTo({top:scroll.current.scrollHeight,behavior:'instant'});},[JSON.stringify(runs),selected,sending]);
   function draft(value:string){setPrompt(value);if(value)localStorage.setItem(draftKey,value);else localStorage.removeItem(draftKey);}
+  useEffect(()=>{
+    if(!mobileList)return;
+    const old=document.activeElement as HTMLElement;
+    const panel=document.querySelector<HTMLElement>('.mw-sessions');
+    panel?.querySelector<HTMLElement>('button')?.focus();
+    const closeOnWide=()=>{if(window.innerWidth>760)setMobileList(false);};
+    const handler=(event:KeyboardEvent)=>{
+      if(event.key==='Escape')setMobileList(false);
+      if(event.key==='Tab'){
+        const items=Array.from(panel?.querySelectorAll<HTMLElement>('button:not([disabled]),input')||[]).filter(item=>item.offsetParent!==null);
+        if(event.shiftKey&&document.activeElement===items[0]){event.preventDefault();items.at(-1)?.focus();}
+        else if(!event.shiftKey&&document.activeElement===items.at(-1)){event.preventDefault();items[0]?.focus();}
+      }
+    };
+    document.addEventListener('keydown',handler);window.addEventListener('resize',closeOnWide);
+    return()=>{document.removeEventListener('keydown',handler);window.removeEventListener('resize',closeOnWide);old?.focus();};
+  },[mobileList]);
   function choose(id:string){setSelected(id);setMobileList(false);}
   function refresh(){list.refresh();conversation.refresh();}
   async function mutation(task:()=>Promise<unknown>){setError('');try{await task();refresh();}catch(e){setError((e as Error).message);}}
@@ -68,6 +85,7 @@ export function AgentPage({snap,act,busy,status,navigate}:GamePageProps&{status:
   }
   const title=session?.title||(selected?'正在加载会话…':'新会话');
   return <section className={'mw-assistant '+(mobileList?'show-sessions ':'')+(inspector?'with-inspector':'')} aria-label="Agent 工作区">
+    {mobileList&&<button className="mw-drawer-backdrop" aria-label="收起会话列表" onClick={()=>setMobileList(false)}/>}
     <aside className="mw-sessions">
       <div className="mw-sessions-top"><span><Sparkles size={18}/>助手工作区</span><button className="mw-icon mw-mobile" aria-label="关闭会话列表" onClick={()=>setMobileList(false)}><X size={18}/></button></div>
       <button className="mw-new" onClick={()=>void create()}><Plus size={18}/>新建会话 <kbd>+</kbd></button>
@@ -88,7 +106,7 @@ export function AgentPage({snap,act,busy,status,navigate}:GamePageProps&{status:
       </div>
       {below&&<button className="mw-bottom" aria-label="跳转到最新消息" onClick={()=>{stick.current=true;scroll.current?.scrollTo({top:scroll.current.scrollHeight,behavior:'smooth'});}}><ArrowDown size={18}/></button>}
       <div className="mw-compose-wrap">{error&&<div className="mw-compose-error" role="alert"><span>{error}</span><button className="mw-icon" aria-label="关闭错误" onClick={()=>setError('')}><X size={15}/></button></div>}
-        {closed?<div className="mw-closed"><Archive size={18}/><span>此会话已{session?.deleted?'删除':'归档'}，恢复后可以继续对话。</span><button onClick={()=>session&&void change(session,{deleted:false,archived:false})}><Undo2 size={15}/>恢复会话</button></div>:<><div className="mw-composer"><textarea aria-label="给 Agent 的消息" readOnly={sending} value={prompt} onChange={e=>draft(e.target.value)} rows={3} placeholder={configured?'描述你想完成的事情，或接着上文继续说…':'请先在模型设置中分配模型'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!sending&&!active&&configured)void send();}}}/><div className="mw-compose-controls"><label className="mw-approval-toggle"><input type="checkbox" checked={approvalMode==='auto'} onChange={e=>void setApproval(e.target.checked?'auto':'manual')} disabled={closed||approvalSaving}/><span>自动同意操作</span></label><span className="mw-mode-hint">{approvalMode==='auto'?'此会话的新操作直接执行':'需要修改或运行代码时，由你批准'}</span>{active?<button className="mw-stop" onClick={()=>void stop(active)}><Square size={14}/>停止</button>:<button className="mw-send" aria-label="发送消息" disabled={sending||approvalSaving||!prompt.trim()||!configured} onClick={()=>void send()}>{sending?<LoaderCircle size={17} className="mw-spin"/>:<ArrowUp size={18}/>}</button>}</div></div><div className="mw-compose-note"><span>{needsInput?'回答上方业务问题，助手会接着原任务继续处理。':waiting?'等待你批准。也可以直接补充要求，原申请会作废。':approvalMode==='auto'?'此会话已自动同意，新的修改和代码操作会直接执行。':'直接讨论或提出要求，Agent 会在需要操作时请求批准。'}</span><span>Enter 发送 · Shift + Enter 换行</span></div>{!configured&&<button className="mw-configure" onClick={()=>navigate('models')}>前往模型设置 <ChevronRight size={14}/></button>}</>}
+        {closed?<div className="mw-closed"><Archive size={18}/><span>此会话已{session?.deleted?'删除':'归档'}，恢复后可以继续对话。</span><button onClick={()=>session&&void change(session,{deleted:false,archived:false})}><Undo2 size={15}/>恢复会话</button></div>:<><div className="mw-composer"><textarea aria-label="给 Agent 的消息" readOnly={sending} value={prompt} onChange={e=>draft(e.target.value)} rows={3} placeholder={configured?'描述你想完成的事情，或接着上文继续说…':'请先在模型设置中分配模型'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&(e.ctrlKey||e.metaKey||window.matchMedia('(pointer: fine)').matches)){e.preventDefault();if(!sending&&!active&&configured)void send();}}}/><div className="mw-compose-controls"><label className="mw-approval-toggle"><input type="checkbox" checked={approvalMode==='auto'} onChange={e=>void setApproval(e.target.checked?'auto':'manual')} disabled={closed||approvalSaving}/><span>自动同意操作</span></label><span className="mw-mode-hint">{approvalMode==='auto'?'此会话的新操作直接执行':'需要修改或运行代码时，由你批准'}</span>{active?<button className="mw-stop" onClick={()=>void stop(active)}><Square size={14}/>停止</button>:<button className="mw-send" aria-label="发送消息" disabled={sending||approvalSaving||!prompt.trim()||!configured} onClick={()=>void send()}>{sending?<LoaderCircle size={17} className="mw-spin"/>:<ArrowUp size={18}/>}</button>}</div></div><div className="mw-compose-note"><span>{needsInput?'回答上方业务问题，助手会接着原任务继续处理。':waiting?'等待你批准。也可以直接补充要求，原申请会作废。':approvalMode==='auto'?'此会话已自动同意，新的修改和代码操作会直接执行。':'直接讨论或提出要求，Agent 会在需要操作时请求批准。'}</span><span>电脑 Enter 发送 · 手机点击发送</span></div>{!configured&&<button className="mw-configure" onClick={()=>navigate('models')}>前往模型设置 <ChevronRight size={14}/></button>}</>}
       </div>
     </div>
     {inspector&&<PlayerInspector gameId={snap.game.id} onClose={()=>showInspector(false)} onPrompt={text=>{draft(text);if(window.innerWidth<1400)showInspector(false);}} navigate={navigate}/>}
