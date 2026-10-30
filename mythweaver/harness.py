@@ -13,6 +13,9 @@ from .agent_reads import tools as read_tools,read,MODELS as READ_MODELS
 from .db import AgentRun,HarnessTask,ToolExecution
 from .definitions import DomainError
 from .models import Models,assistant_message
+from .harness_protocol import arguments as parse_arguments,normalize,diagnostics,provider_tools,repair_context
+from .harness_results import ResultRead,observation as result_observation
+from .module_patch import ModulePatch
 from .plugins import cancellable
 from .schemas import Input
 from .service import packed
@@ -71,6 +74,7 @@ MODELS['simulate_conversation']=ConversationSimulation
 MODELS['platform_rules_read']=InstructionRead
 MODELS.update(requirements_read=QualityQuery,acceptance_run=AcceptanceRequest,trial_list=Empty,trial_create=TrialCreate,trial_turn=TrialTurn,trial_change=TrialChange)
 MODELS['ask_admin']=AskAdmin
+MODELS.update(read_tool_result=ResultRead,preview_module_patch=ModulePatch,patch_module=ModulePatch)
 DESCRIPTIONS={'platform_rules_read':'读取全平台消息触发、指令格式、全局Agent行为说明和版本。与当前游戏规则分开。',
  'platform_rules_update':'申请修改全平台运行规则。changes仅填实际要修改字段，apply_scope=all_games会清除对应游戏覆盖使其统一生效；需审批，不能修改审批策略或密钥。',
  'plugin_draft':'申请保存Python/Node代码插件新版本。manifest包含runtime、requirements、tools与tests；审批后保存，暂不运行代码。',
@@ -95,6 +99,9 @@ DESCRIPTIONS.update(requirements_read='读取持久原文、历史版本条款�
     trial_turn='在指定试玩空间继续一次真实玩家模型对话，持久保存随机结果和状态，不重放历史，不修改正式数据或发送QQ。需要最新version和唯一key。',
     trial_change='重置到试玩初始状态或丢弃空间，不影响正式游戏。需最新version。')
 DESCRIPTIONS['ask_admin']='只有缺少会改变玩法的业务规则或外部依赖、确实无法继续时，提出一个具体问题并保存进度等待回复。技术配置遗漏由你补齐，不能用此工具让GM设计schema、权限或测试。不是申请修改的审批工具。'
+DESCRIPTIONS.update(read_tool_result='按本任务call_id及JSON Pointer读取完整持久回执。省略call_id分页列出目录。大结果自动提供摘要和此入口，offset/limit续读；不会重新执行工具。',
+    preview_module_patch='校验已有模块的局部修改，不写入。提供刚读取的definition_version和JSON Pointer edits（test/add/replace/remove），不重写整份manifest。',
+    patch_module='申请对已有模块作小范围、版本绑定的修改。先preview_module_patch检查；审批后通过原module.put原子执行并保留检查点，不改变未指定字段。')
 
 HARNESS_SYSTEM=MANAGER_GUIDANCE+'''
 【实际工具协议与权限】
@@ -124,7 +131,9 @@ files是相对路径到文本源码的映射。Python入口函数def name(data)�
 插件效果格式：{type_key,id_from,field,operation:plugin,plugin_key,tool,expression:生成插件输入对象的表达式}；插件返回值成为该字段新值，仍校验记录schema/引用/归属。
 若管理员授权玩家调用插件交互，交互的player_enabled与插件工具的player_enabled都必须为true。提交前plugin_inspect核实实际工具授权；只开放交互不能代替底层工具授权。
 插件安装、测试和外部工具副作用不属于数据库回滚范围；不要声称游戏检查点能撤销这些外部操作。
-结束前核实实际工具结果，并清楚报告已完成和剩余事项。使用record_progress记录阶段成果。
+结束前核实实际工具结果，并清楚报告已完成和剩余事项。复杂任务先用record_progress说明准备完成哪些业务步骤，完成阶段后更新completed与next_step；不要让界面连续几分钟只有读取日志。
+已有模块的小改动优先preview_module_patch/patch_module，以刚读取的definition_version及模块内JSON Pointer定位；不要为了改几个字段反复输出整份manifest。先preview核对变化再申请patch，未指定字段由服务器原样保留。大型新模块仍可module.put。
+大工具回执会返回partial=true摘要和stored_result续读入口，完整数据和原始call_id仍在当前任务中。read_tool_result按需读取字段和分段文本，不重复执行原工具，不把预览当原文。对同一版本已读过的语法和资料优先复用；版本变化、失败修复需要时才重新读取。
 inspect_runtime传sections:[types,interactions,workflows]按需读取当前定义。插件函数不以游戏为必备结构，可用于任何管理员授权任务。
 需要多记录结算、隐藏数据解析或分别私聊通知时，先读取inspect_runtime返回的extensions协议。通过交互/流程步骤extension授予插件reads/writes/messages，插件返回updates/messages，由平台校验并原子提交。不要为此给玩家开放管理命令或shared_write。匿名代号、规则和受众正文由你创建的类型及插件决定；真实QQ绑定/发信须符合管理员任务授权。
 '''
@@ -141,16 +150,19 @@ def context_window(messages):
         cost=len(json.dumps(group,ensure_ascii=False))
         if size+cost>70000:break
         suffix=group+suffix;size+=cost
-    summary=[]
+    summary=[];updates=[];progress=None
     for message in messages[3:]:
+        if message.get('role')=='user' and not str(message.get('content','')).startswith(('执行器反馈：','执行器检查：','执行预算提示：')):
+            updates.append(message.get('content'))
         if message.get('role')=='tool':
             try:
                 data=json.loads(message['content'])
                 value=data.get('value')
+                if isinstance(value,dict) and 'completed' in value and 'next_step' in value:progress=value
                 summary.append({'call_id':message['tool_call_id'],'ok':data.get('ok'),'code':data.get('code'),
                                 'receipt':{k:value[k] for k in ('id','key','status','revision','enabled','completed','next_step') if k in value} if isinstance(value,dict) else None})
             except (ValueError,TypeError,KeyError):pass
-    notice={'role':'user','content':'较早工具结果已压缩，完整记录仍保存在任务日志。不要重复副作用；用plugin_list/inspect和读取工具核实当前状态。\n'+json.dumps(summary[-30:],ensure_ascii=False)}
+    notice={'role':'user','content':'较早工具结果已压缩，完整记录仍保存在任务日志，可按call_id用read_tool_result读取。不要重复副作用；不要把摘要当完整原文。管理员补充要求保留如下，后发要求用于调整此前目标。\n'+json.dumps({'administrator_updates':updates,'saved_progress':progress,'receipts':summary[-30:]},ensure_ascii=False)}
     return [*messages[:3],notice,*suffix]
 
 
@@ -170,11 +182,26 @@ def protocol_issue(message,max_calls=4):
     seen=set()
     for call in calls:
         try:
-            cid=call['id'];function=call['function'];name=function['name'];arguments=json.loads(function['arguments'])
+            cid=call['id'];function=call['function'];name=function['name'];arguments=parse_arguments(function['arguments'])
             if not isinstance(cid,str) or not 1<=len(cid)<=200 or cid in seen or not isinstance(name,str) or not 1<=len(name)<=100 or not isinstance(arguments,dict):return 'INVALID_TOOL_INPUT'
             seen.add(cid)
         except (ValueError,TypeError,KeyError):return 'INVALID_TOOL_INPUT'
     return None
+
+
+class ContextProjector:
+    """Reuse a stable compacted prefix until the next boundary, preserving cache locality."""
+    def __init__(self):self.source=[];self.view=[]
+
+    def prepare(self,messages):
+        if self.source and messages[1:len(self.source)]==self.source[1:]:
+            candidate=[messages[0],*self.view[1:],*messages[len(self.source):]]
+        else:candidate=messages
+        size=lambda value:len(json.dumps(value,ensure_ascii=False))
+        compacted=size(candidate)>=120000
+        view=context_window(messages) if compacted else candidate
+        self.source=list(messages);self.view=list(view)
+        return view,{'compacted':compacted,'source_chars':size(messages),'projected_chars':size(view)}
 
 
 class Harness:
@@ -229,6 +256,12 @@ class Harness:
         return [*read_tools(),*builtin,*self.service.plugins.tool_specs(game_id)]
 
     async def execute(self,game_id,run_id,name,arguments,execution_id):
+        if name=='read_tool_result':
+            from .harness_results import read as read_result
+            return read_result(self.store,run_id,arguments)
+        if name in ('preview_module_patch','patch_module'):
+            from .module_patch import run as module_patch
+            return await asyncio.to_thread(module_patch,self.service,game_id,arguments,execution_id if name=='patch_module' else None)
         if name=='ask_admin':return AskAdmin.model_validate(arguments).model_dump()
         if name=='workspace_create':return await asyncio.to_thread(self.service.create_game,arguments['name'].strip(),arguments.get('description',''))
         if name=='workspace_delete':
@@ -330,7 +363,7 @@ class Harness:
         selected=self.models.resolve('planner')
         async with httpx.AsyncClient(timeout=selected.timeout,follow_redirects=False,trust_env=False) as client:
             async with client.stream('POST',selected.llm_base_url.rstrip('/')+'/chat/completions',headers={'Authorization':'Bearer '+selected.llm_api_key},
-                json={'model':selected.llm_model,'messages':messages,'tools':tools,'tool_choice':'auto',selected.token_parameter:selected.max_tokens}) as response:
+                json={'model':selected.llm_model,'messages':messages,'tools':provider_tools(tools),'tool_choice':'auto',selected.token_parameter:selected.max_tokens}) as response:
                 response.raise_for_status()
                 raw=bytearray()
                 async for chunk in response.aiter_bytes():
@@ -353,7 +386,7 @@ class Harness:
     async def run(self,game_id,run_id):
         if run_id in self.running:raise DomainError('TASK_BUSY','任务正在执行',409)
         self.running[run_id]=asyncio.current_task()
-        started=time.monotonic();stalls=0;request_failures=0;handoff_stalls=0
+        started=time.monotonic();stalls=0;request_failures=0;handoff_stalls=0;context=ContextProjector()
         try:
             from .platform_rules import read as read_platform
             with self.store.session() as db:timeout=read_platform(db)['rules']['agent_timeout_seconds']
@@ -383,9 +416,11 @@ class Harness:
                     advertised_tools=stored_tools if continuing else self.tools(game_id)
                     if continuing:message={'tool_calls':pending_calls}
                     else:
-                        self.model_event(run_id,tool='model.request',step=step)
+                        projected,context_info=context.prepare(messages)
+                        if context_info['compacted']:self.model_event(run_id,tool='model.context',**context_info)
+                        self.model_event(run_id,tool='model.request',step=step,input_chars=context_info['projected_chars'])
                         try:
-                            message=await self.request(context_window(messages),advertised_tools)
+                            message=await self.request(projected,advertised_tools)
                         except (httpx.TransportError,httpx.HTTPStatusError) as error:
                             status=error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None
                             retryable=status is None or status in (408,429) or status>=500
@@ -400,6 +435,8 @@ class Harness:
                     meta=message.get('_response_meta') if isinstance(message,dict) else None
                     if meta:
                         self.model_event(run_id,tool='model.response',**meta)
+                    message,fixes=normalize(message)
+                    if fixes:self.model_event(run_id,tool='model.normalized',fixes=fixes,executed=False)
                     max_calls=rules['agent_tool_calls_per_turn']
                     issue=protocol_issue(message,max_calls)
                     if issue:
@@ -414,8 +451,10 @@ class Harness:
                                 'INVALID_TOOL_BATCH':'下一轮只调用一个工具；剩余步骤等该工具实际回执后继续，不要将整个计划合成一轮。',
                                 'EMPTY_MODEL_RESPONSE':'上一轮既没有答复也没有工具调用。继续执行尚未完成的下一步；确实缺少业务决定时调用ask_admin，已完成则单独finish_task引用真实回执。',
                             }.get(issue,'请输出格式完整且arguments为JSON对象字符串的工具调用。先读取工具schema，下一轮只提交最小必要参数；不要将代码或JSON参数直接当作答复。')
-                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。{recovery}每轮数量限制为{max_calls or "不限"}；不要重演此前成功的步骤。'}]
-                        self.model_event(run_id,tool='model.protocol',code=issue,attempt=stalls,limit=rules['agent_stall_limit'],retrying=not stopped,executed=False)
+                            detail=diagnostics(message)
+                            excerpt=repair_context(message) if issue=='INVALID_TOOL_INPUT' else []
+                            task.messages=[*task.messages,{'role':'user','content':f'执行器反馈：{issue}。上一轮响应没有执行任何工具。具体格式问题：{json.dumps(detail,ensure_ascii=False)}。仅供定位语法错误的局部草稿，不能当完整业务原文：{json.dumps(excerpt,ensure_ascii=False)}。{recovery}已有大模块优先preview_module_patch/patch_module逐字段修改；大结果用read_tool_result续读，勿重写完整定义。每轮数量限制为{max_calls or "不限"}；不要重演此前成功的步骤。'}]
+                        self.model_event(run_id,tool='model.protocol',code=issue,details=detail,attempt=stalls,limit=rules['agent_stall_limit'],retrying=not stopped,executed=False)
                         if stopped:raise DomainError('MODEL_PROTOCOL_STALLED','模型连续返回无法执行的工具协议，已保存进度',409)
                         continue
                     stalls=0
@@ -482,16 +521,14 @@ class Harness:
                             if hasattr(exc,'detail'):result['detail']=exc.detail
                         except Exception as exc:
                             result={'ok':False,'code':'TOOL_FAILED','message':type(exc).__name__}
-                        text=json.dumps(result,ensure_ascii=False,allow_nan=False)
-                        if len(text)>30000:
-                            result={'ok':False,'code':'TOOL_RESULT_TOO_LARGE','message':'工具已执行，返回内容过大，请缩小读取范围或检查插件报告；不要自动重演副作用。'}
+                        json.dumps(result,ensure_ascii=False,allow_nan=False)
                         with self.store.session.begin() as db:
                             execution=db.get(ToolExecution,execution_id)
                             execution.result,execution.status=result,'completed'
                             task=db.get(HarnessTask,run_id)
                             task.pending_calls=[c for c in task.pending_calls if c['id']!=call_id]
                             if not task.pending_calls:task.pending_tools=[]
-                            observation={**result,'receipt':{'call_id':call_id,'execution_id':execution_id}}
+                            observation=result_observation(result,call_id,execution_id)
                             task.messages=[*task.messages,{'role':'tool','tool_call_id':call_id,'content':json.dumps(observation,ensure_ascii=False)}]
                             run=db.get(AgentRun,run_id)
                             run.tool_trace=[*run.tool_trace,{'tool':name,'execution_id':execution_id,'ok':result['ok']}]

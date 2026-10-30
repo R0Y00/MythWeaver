@@ -33,6 +33,7 @@ class WorkspaceDelete(WorkspaceInspect):
 
 
 FORBIDDEN={'workspace_list','workspace_inspect','workspace_call','workspace_create','workspace_delete','finish_task','record_progress','ask_admin','platform_rules_read','platform_rules_update'}
+FORBIDDEN.add('read_tool_result')
 
 
 def validate(harness,arguments):

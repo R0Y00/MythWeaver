@@ -89,7 +89,7 @@ def create_app(settings=None, store=None):
             await bot.socket.close(code=1001)
         store.engine.dispose()
 
-    app = FastAPI(title="MythWeaver", version="0.11.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="MythWeaver", version="0.12.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service, app.state.bot, app.state.store = service, bot, store
     from .quality_api import router as quality_router
     app.include_router(quality_router(service,settings))
@@ -270,7 +270,7 @@ def create_app(settings=None, store=None):
     @app.get("/api/status")
     def status():
         selected=models.available()
-        return {"onebot": bot.status(), "version":"0.11.0", "agent": {"configured":bool(selected),
+        return {"onebot": bot.status(), "version":"0.12.0", "agent": {"configured":bool(selected),
                 "model":selected,"message":"管理助手已配置" if selected else "请在模型管理中分配管理规划模型"}}
 
     @app.get("/api/games")

@@ -7,7 +7,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 // Render actual UI states without starting the platform or opening a browser.
 const server=await createServer({root:fileURLToPath(new URL('..',import.meta.url)),optimizeDeps:{noDiscovery:true,include:[],entries:[]},server:{middlewareMode:true},appType:'custom'});
 try{
-  const {AgentProgress,executionKind}=await server.ssrLoadModule('/src/pages/agent-progress.tsx');
+  const {AgentProgress,executionKind,tokenTotals}=await server.ssrLoadModule('/src/pages/agent-progress.tsx');
   const base={id:'test',status:'running',tool_trace:[],created_at:new Date().toISOString()};
   const props={label:name=>name,resume(){},stop(){},settings(){},resuming:false,canResume:true,step:13,executions:[]};
   const render=(run,extra={})=>renderToStaticMarkup(createElement(AgentProgress,{...props,...extra,run:{...base,...run}}));
@@ -24,9 +24,26 @@ try{
   assert.ok(old.includes('模型多次返回无法执行的内容'));
   const retry=render({tool_trace:[{tool:'model.retry',code:'MODEL_REQUEST_TIMEOUT',attempt:1,retrying:true}]});
   assert.ok(retry.includes('正在自动恢复')&&retry.includes('无需发送“继续”'));
-  const auth=render({status:'failed',error_code:'MODEL_HTTP_ERROR',tool_trace:[{tool:'model.retry',code:'MODEL_HTTP_ERROR',http_status:401,attempt:1,retrying:false}]});
+  const auth=render({status:'failed',error_code:'MODEL_HTTP_ERROR',tool_trace:[{tool:'model.retry',code:'MODEL_HTTP_ERROR',http_status:401,attempt:1,retrying:false}]},{initialTab:'diagnostics'});
   assert.ok(auth.includes('HTTP 401')&&auth.includes('已停止自动重试'));
   assert.equal(executionKind({name:'workspace_call',arguments:{tool:'query_records'}}),'read');
   assert.equal(executionKind({name:'workspace_call',arguments:{tool:'execute_commands'}}),'change');
-  console.log('Agent UI: 9 state and classification checks passed.');
+  assert.equal(executionKind({name:'patch_module'}),'change');
+  assert.equal(executionKind({name:'read_tool_result'}),'read');
+  const totals=tokenTotals([{tool:'model.response',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:800}},{tool:'model.response',usage:{prompt_tokens:1500,completion_tokens:80,prompt_tokens_details:{cached_tokens:1000}}}]);
+  assert.deepEqual(totals,{input:2500,output:180,cached:1800,reported:2,cachedReported:true});
+  const usage=render({status:'completed',tool_trace:[{tool:'model.response',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:800}}]},{initialTab:'diagnostics'});
+  assert.ok(usage.includes('累计输入')&&usage.includes('1,000')&&usage.includes('800')&&usage.includes('缓存包含在输入中'));
+  const progress=render({status:'running'},{executions:[{id:'p',name:'record_progress',status:'completed',result:{ok:true,value:{completed:'插件就绪',next_step:'连续试玩'}}}]});
+  assert.ok(progress.includes('插件就绪')&&progress.includes('连续试玩'));
+  const {copyText}=await server.ssrLoadModule('/src/clipboard.ts');
+  let saved='',legacyCopied=false;
+  Object.defineProperty(globalThis,'navigator',{value:{clipboard:{writeText:async text=>{saved=text;}}},configurable:true});
+  await copyText('诊断');assert.equal(saved,'诊断');
+  Object.defineProperty(globalThis,'navigator',{value:{},configurable:true});
+  const area={value:'',style:{},setAttribute(){},focus(){},select(){},remove(){}};
+  globalThis.document={activeElement:null,getSelection(){return null;},createElement(){return area;},body:{append(){}},execCommand(command){legacyCopied=command==='copy';return true;}};
+  await copyText('HTTP 诊断');assert.ok(legacyCopied&&area.value==='HTTP 诊断');
+  document.execCommand=()=>false;await assert.rejects(copyText('诊断'));
+  console.log('Agent UI: 17 state, usage and clipboard checks passed.');
 }finally{await server.close();}

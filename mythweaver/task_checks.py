@@ -55,6 +55,10 @@ def player_targets(db,run_id):
         game=db.get(Game,target)
         if not game or not policy_for(db,target)[0]['player_agent_enabled']:continue
         relevant=False
+        if name=='patch_module':
+            manifest=game.definition.get('modules',{}).get(args.get('key'),{})
+            relevant=any(s.get('player_enabled') for s in manifest.get('interactions',{}).values()) or any(s.get('player_access') for s in manifest.get('types',{}).values())
+            relevant=relevant or any('/player_' in edit.get('path','') for edit in args.get('edits',[]))
         if name=='execute_commands':
             for command in args.get('commands',[]):
                 kind=command.get('kind');payload=command.get('payload',{})

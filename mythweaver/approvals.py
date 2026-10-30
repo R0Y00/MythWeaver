@@ -14,6 +14,7 @@ READ_ONLY={'query_records','query_events','inspect_flow','inspect_runtime','insp
 READ_ONLY.update({'requirements_read','trial_list'})
 READ_ONLY.add('inspect_player_agent')
 READ_ONLY.add('ask_admin')
+READ_ONLY.update({'read_tool_result','preview_module_patch'})
 
 class ApprovalDecision(Input):
     decision:Literal['approve','reject']
